@@ -1,6 +1,6 @@
 // Fenêtre de gauche : paramètres de l'élément sélectionné, ou arbre écran > areas > widgets (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
-import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
+import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, detachComponentInstance, saveWidgetAsComponent } from '../model/document.js';
 import { getIconSvg } from '../render/iconLibrary.js';
@@ -12,7 +12,7 @@ import {
   copySelectedAppearance, deleteSelection, duplicateSelection, pasteAppearanceOnSelection, splitSelectedArea, updateNode,
 } from './editorActions.js';
 
-const LEFT_SECTIONS = [{ value: 'properties', label: 'Paramètres' }, { value: 'tree', label: 'Arbre' }];
+const LEFT_SECTIONS = [{ value: 'properties', label: 'Paramètres' }, { value: 'tree', label: 'Arbre' }, { value: 'settings', label: 'Réglages de l\x27app' }];
 const SIZING_MODES = [{ value: 'fill', label: 'Remplir le reste' }, { value: 'fixed', label: 'Fixe (px)' }, { value: 'proportional', label: 'Proportionnelle' }];
 const LAYOUT_MODES = [{ value: 'stack', label: 'Pile' }, { value: 'grid', label: 'Grille' }, { value: 'free', label: 'Libre (ancrage)' }];
 const ALIGN_CHOICES = ['start', 'center', 'end', 'stretch', 'spaceBetween'];
@@ -31,7 +31,7 @@ function createAppearanceFields(appearanceValues, onFieldChange) {
   return APPEARANCE_FIELDS.map((fieldDefinition) => {
     const currentValue = appearanceValues[fieldDefinition.key];
     if (fieldDefinition.kind === 'color') return createColorField(fieldDefinition.label, currentValue, uiDocument, currentThemeId, (newValue) => onFieldChange(fieldDefinition.key, newValue));
-    if (fieldDefinition.kind === 'number') return createNumberField(fieldDefinition.label, currentValue, (newValue) => onFieldChange(fieldDefinition.key, newValue));
+    if (fieldDefinition.kind === 'number') return createNumberField(fieldDefinition.label, currentValue, (newValue) => onFieldChange(fieldDefinition.key, newValue), fieldDefinition);
     if (fieldDefinition.kind === 'select') return createSelectField(fieldDefinition.label, currentValue ?? '', fieldDefinition.options, (newValue) => onFieldChange(fieldDefinition.key, newValue || undefined));
     return createTextField(fieldDefinition.label, Array.isArray(currentValue) ? currentValue.join(' ') : '', (newText) => {
       const paddingValues = newText.trim().split(/[\s,]+/).filter(Boolean).map(Number);
@@ -178,8 +178,8 @@ function createAreaProperties(area, record) {
   if (record.parent) {
     sections.push(createPanelSection('Taille dans le découpage', [
       createSelectField('Mode', sizing.mode, SIZING_MODES, (mode) => updateSizing('mode', mode)),
-      sizing.mode === 'fixed' ? createNumberField('Taille (px)', sizing.size, (size) => updateSizing('size', size)) : null,
-      sizing.mode === 'proportional' ? createNumberField('Proportion (0–1)', sizing.ratio, (ratio) => updateSizing('ratio', ratio)) : null,
+      sizing.mode === 'fixed' ? createNumberField('Taille (px)', sizing.size, (size) => updateSizing('size', size), { min: 0 }) : null,
+      sizing.mode === 'proportional' ? createNumberField('Proportion (0–1)', sizing.ratio, (ratio) => updateSizing('ratio', ratio), { step: 0.01, min: 0.05, max: 0.95 }) : null,
       createNumberField('Min (px)', sizing.min, (minimum) => updateSizing('min', minimum)),
       createNumberField('Max (px)', sizing.max, (maximum) => updateSizing('max', maximum)),
       createCheckboxField('Séparateur déplaçable après cette area (dans l\'app)', area.resizableSplitter ?? appState.uiDocument.project.defaults?.resizableSplitter,
@@ -262,6 +262,16 @@ function createWidgetContentField(widget, fieldDefinition) {
         const [itemLabel, itemIcon = ''] = line.split('|').map((part) => part.trim());
         return { ...(currentValue?.[lineIndex] ?? {}), label: itemLabel, icon: itemIcon };
       })), { isMultiline: true, placeholder: 'Texte | lucide:icone' });
+    case 'tableColumns': return createTextField(fieldDefinition.label,
+      (currentValue ?? []).map((column) => `${column.label} | ${column.width ?? 'fill'}`).join('\n'),
+      (linesText) => commitValue(linesText.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+        const [columnLabel, columnWidth = 'fill'] = line.split('|').map((part) => part.trim());
+        return { label: columnLabel, width: /^\d+$/.test(columnWidth) ? Number(columnWidth) : 'fill' };
+      })), { isMultiline: true, placeholder: 'Name | fill\nSize | 80' });
+    case 'tableRows': return createTextField(fieldDefinition.label,
+      (currentValue ?? []).map((rowCells) => rowCells.join(' | ')).join('\n'),
+      (linesText) => commitValue(linesText.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => line.split('|').map((cell) => cell.trim()))),
+      { isMultiline: true, placeholder: 'Item A | Mesh | 12 MB' });
     case 'icon': {
       const previewElement = createElement('span', { className: 'icon-preview', html: getIconSvg(currentValue) });
       const textRow = createTextField(fieldDefinition.label, currentValue, (iconReference) => commitValue(iconReference.trim()), { placeholder: 'lucide:nom' });
@@ -403,11 +413,37 @@ function createTreeView() {
   return createElement('div', { className: 'tree-view' }, rows);
 }
 
+/**
+ * Réglages de l'application (gardés dans l'appareil, pas dans le projet).
+ * @returns {HTMLElement[]} sections
+ */
+function createAppSettingsView() {
+  const settingDefinitions = [
+    { key: 'handleSize', label: 'Taille des poignées de widget (px)', min: 8, max: 48 },
+    { key: 'resizeHandleSize', label: 'Taille des poignées de redimensionnement (px)', min: 6, max: 40 },
+    { key: 'scrubPixelsPerStep', label: 'Valeurs en glissant : px par pas (plus grand = plus lent)', min: 1, max: 40 },
+    { key: 'snapDistance', label: 'Aimantation des bords d\x27areas (px, 0 = aucune)', min: 0, max: 40 },
+  ];
+  return [createPanelSection('Réglages de l\x27app', [
+    createElement('div', { className: 'panel-hint', text: 'Gardés dans cet appareil. Astuce : glisse sur un libellé souligné pour changer la valeur.' }),
+    ...settingDefinitions.map((settingDefinition) => createNumberField(settingDefinition.label, appSettings[settingDefinition.key],
+      (newValue) => updateAppSetting(settingDefinition.key, newValue), { step: 1, min: settingDefinition.min, max: settingDefinition.max })),
+    createButtonRow([{ label: 'Valeurs par défaut', onClick: () => {
+      for (const settingKey of Object.keys(DEFAULT_APP_SETTINGS)) updateAppSetting(settingKey, DEFAULT_APP_SETTINGS[settingKey]);
+    } }]),
+  ])];
+}
+
 /** Redessine la fenêtre de gauche. */
 export function renderLeftPanel() {
+  if (appState.isScrubbing) return;
   sectionSelectHost.replaceChildren(createSelectElement(appState.leftPanelSection, LEFT_SECTIONS, (section) => { appState.leftPanelSection = section; notifyChange(); }));
   const scrollPosition = panelBodyElement.scrollTop;
   panelBodyElement.replaceChildren();
+  if (appState.leftPanelSection === 'settings') {
+    panelBodyElement.append(...createAppSettingsView());
+    return;
+  }
   if (appState.leftPanelSection === 'tree') {
     panelBodyElement.append(createTreeView());
     panelBodyElement.scrollTop = scrollPosition;

@@ -96,6 +96,21 @@ export const WIDGET_TYPES = {
       { target: 'content', key: 'selectedIndex', label: 'Sélection (index, -1 = aucune)', kind: 'number' },
     ],
   },
+  table: {
+    label: 'Tableau', libraryIcon: 'table',
+    defaults: { name: 'DataTable',
+      content: { columns: [{ label: 'Name', width: 'fill' }, { label: 'Type', width: 100 }, { label: 'Size', width: 80 }],
+        rows: [['Item A', 'Mesh', '12 MB'], ['Item B', 'Light', '1 KB'], ['Item C', 'Camera', '2 KB']],
+        headerVisible: true, selectedRow: 0, striped: true },
+      size: { width: 'fill', height: 160 } },
+    fields: [
+      { target: 'content', key: 'columns', label: 'Colonnes (Nom | largeur)', kind: 'tableColumns' },
+      { target: 'content', key: 'rows', label: 'Lignes (cellules séparées par |)', kind: 'tableRows' },
+      { target: 'content', key: 'headerVisible', label: 'En-tête visible', kind: 'checkbox' },
+      { target: 'content', key: 'striped', label: 'Lignes alternées', kind: 'checkbox' },
+      { target: 'content', key: 'selectedRow', label: 'Ligne sélectionnée (-1 = aucune)', kind: 'number' },
+    ],
+  },
   icon: {
     label: 'Icône', libraryIcon: 'star',
     defaults: { name: 'Icon', content: { icon: 'lucide:star', size: 20 }, size: { width: 'hug', height: 'hug' } },
@@ -154,13 +169,13 @@ export const WIDGET_TYPES = {
 export const APPEARANCE_FIELDS = [
   { key: 'background', label: 'Fond', kind: 'color' },
   { key: 'textColor', label: 'Couleur du texte', kind: 'color' },
-  { key: 'borderWidth', label: 'Bordure (épaisseur)', kind: 'number' },
+  { key: 'borderWidth', label: 'Bordure (épaisseur)', kind: 'number', min: 0 },
   { key: 'borderColor', label: 'Bordure (couleur)', kind: 'color' },
-  { key: 'radius', label: 'Arrondi', kind: 'number' },
-  { key: 'fontSize', label: 'Taille du texte', kind: 'number' },
+  { key: 'radius', label: 'Arrondi', kind: 'number', min: 0 },
+  { key: 'fontSize', label: 'Taille du texte', kind: 'number', min: 1 },
   { key: 'fontWeight', label: 'Graisse', kind: 'select', options: ['', '400', '500', '600', '700'] },
   { key: 'padding', label: 'Marges internes (h d b g)', kind: 'padding' },
-  { key: 'opacity', label: 'Opacité (0–1)', kind: 'number' },
+  { key: 'opacity', label: 'Opacité (0–1)', kind: 'number', step: 0.01, min: 0, max: 1 },
 ];
 
 /** Cibles possibles d'un style (appliesTo). */

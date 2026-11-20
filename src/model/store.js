@@ -1,8 +1,57 @@
 // État de l'application : document, sélection, historique annuler / rétablir, sauvegarde locale (PROTOTYPE).
-import { createDefaultDocument, normalizeImportedDocument } from './document.js';
+import { createEmptyDocument, normalizeImportedDocument } from './document.js';
 
 const STORAGE_KEY = 'uimakerNoob.prototype.document';
+const SETTINGS_STORAGE_KEY = 'uimakerNoob.settings';
 const HISTORY_LIMIT = 100;
+
+/** Réglages de l'application (pas du projet), gardés dans l'appareil. */
+export const DEFAULT_APP_SETTINGS = {
+  handleSize: 18,            // hauteur des poignées de widget (px à l'écran, quel que soit le zoom)
+  resizeHandleSize: 14,      // côté des poignées de redimensionnement (px à l'écran)
+  scrubPixelsPerStep: 6,     // px à parcourir pour changer une valeur d'un pas en glissant
+  snapDistance: 10,          // distance d'aimantation des bords d'areas (px à l'écran)
+};
+
+export const appSettings = { ...DEFAULT_APP_SETTINGS };
+
+/** Charge les réglages de l'application. */
+function loadAppSettings() {
+  try {
+    const storedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+    for (const settingKey of Object.keys(DEFAULT_APP_SETTINGS)) {
+      if (typeof storedSettings[settingKey] === 'number') appSettings[settingKey] = storedSettings[settingKey];
+    }
+  } catch (error) {
+    console.error('loadAppSettings', error);
+  }
+}
+
+/**
+ * Change un réglage de l'application et l'enregistre.
+ * @param {string} settingKey clé (DEFAULT_APP_SETTINGS)
+ * @param {number|undefined} settingValue nouvelle valeur (undefined = valeur par défaut)
+ */
+export function updateAppSetting(settingKey, settingValue) {
+  appSettings[settingKey] = typeof settingValue === 'number' && !Number.isNaN(settingValue) ? settingValue : DEFAULT_APP_SETTINGS[settingKey];
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
+  } catch (error) {
+    console.error('updateAppSetting', error);
+  }
+  notifyChange();
+}
+
+let activeHistoryGroup = null;
+let lastHistoryGroup = null;
+
+/**
+ * Regroupe les modifications suivantes en un seul pas d'annulation (ex. valeur changée en glissant).
+ * @param {string|null} historyGroup nom du groupe, null pour terminer
+ */
+export function setHistoryGroup(historyGroup) {
+  activeHistoryGroup = historyGroup;
+}
 
 /** Magasin central : toute modification du document passe par commitChange(). */
 export const appState = {
@@ -11,6 +60,7 @@ export const appState = {
   currentScreenId: null,
   currentThemeId: null,
   armedLibraryItem: null,    // { kind: 'widget'|'component'|'icon', value } en attente d'un tap sur le canevas
+  isScrubbing: false,        // vrai pendant qu'on change une valeur en glissant (la fenêtre de gauche ne se redessine pas)
   areIdsVisible: true,
   copiedAppearance: null,
   leftPanelSection: 'properties',
@@ -64,7 +114,9 @@ export function commitChange(mutateDocument) {
     return;
   }
   if (JSON.stringify(appState.uiDocument) === previousSnapshot) { notifyChange(); return; }
-  undoStack.push(previousSnapshot);
+  const isSameGroup = activeHistoryGroup !== null && activeHistoryGroup === lastHistoryGroup;
+  if (!isSameGroup) undoStack.push(previousSnapshot);
+  lastHistoryGroup = activeHistoryGroup;
   if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
   redoStack.length = 0;
   repairViewState();
@@ -104,6 +156,7 @@ export function replaceDocument(newDocument) {
 
 /** Charge le document enregistré, ou crée le projet de départ. */
 export function loadInitialDocument() {
+  loadAppSettings();
   let storedDocument = null;
   try {
     const storedText = localStorage.getItem(STORAGE_KEY);
@@ -111,7 +164,7 @@ export function loadInitialDocument() {
   } catch (error) {
     console.error('loadInitialDocument', error);
   }
-  appState.uiDocument = storedDocument ?? createDefaultDocument();
+  appState.uiDocument = storedDocument ?? createEmptyDocument();
   appState.currentScreenId = appState.uiDocument.screens[0].id;
   appState.currentThemeId = appState.uiDocument.project.defaultTheme;
 }

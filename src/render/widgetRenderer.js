@@ -74,6 +74,17 @@ const WIDGET_CONTENT_BUILDERS = {
   },
   list: (widget) => createItemElements(widget.content?.items, widget.content?.selectedIndex ?? -1, 'uiw-list-item'),
   icon: (widget) => [createIconElement(widget.content?.icon, widget.content?.size ?? 20)],
+  table: (widget) => {
+    const { columns = [], rows = [], headerVisible = true, selectedRow = -1, striped = false } = widget.content ?? {};
+    const gridTemplate = columns.map((column) => (typeof column.width === 'number' ? `${column.width}px` : 'minmax(0, 1fr)')).join(' ');
+    const createRowElement = (cellTexts, rowClassName) => createElement('div', { className: rowClassName, style: { gridTemplateColumns: gridTemplate } },
+      columns.map((column, columnIndex) => createElement('span', { className: 'uiw-table-cell', text: cellTexts[columnIndex] ?? '' })));
+    return [
+      headerVisible ? createRowElement(columns.map((column) => column.label), 'uiw-table-row is-header') : null,
+      ...rows.map((rowCells, rowIndex) => createRowElement(rowCells,
+        `uiw-table-row${rowIndex === selectedRow ? ' is-active' : ''}${striped && rowIndex % 2 === 1 ? ' is-striped' : ''}`)),
+    ];
+  },
   tabs: (widget) => createItemElements(widget.content?.tabs, widget.content?.selectedIndex ?? 0, 'uiw-tab'),
   menuBar: (widget) => createItemElements(widget.content?.menus, -1, 'uiw-menu'),
   separator: () => [],

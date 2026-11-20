@@ -2,7 +2,7 @@
 import { createElement, pickTextFile, saveTextFile } from '../utils/dom.js';
 import { appState, commitChange, notifyChange, replaceDocument, selectNode, stepHistory } from '../model/store.js';
 import { SCREEN_PRESETS } from '../model/catalog.js';
-import { createDefaultDocument, createScreen } from '../model/document.js';
+import { createEmptyDocument, createScreen } from '../model/document.js';
 import { buildUiSpecExport, parseUiSpecImport } from '../io/uispecExport.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import { createSelectElement } from './fields.js';
@@ -51,7 +51,7 @@ async function importUiSpec() {
 
 /** Remplace le projet par un nouveau projet de départ (annulable). */
 function startNewProject() {
-  if (confirm('Nouveau projet ? (le projet actuel reste récupérable avec Annuler)')) replaceDocument(createDefaultDocument());
+  if (confirm('Nouveau projet ? (le projet actuel reste récupérable avec Annuler)')) replaceDocument(createEmptyDocument());
 }
 
 /**

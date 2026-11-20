@@ -170,7 +170,8 @@ export function renderScreen(uiDocument, screen, renderOptions) {
     element.dataset.nodeId = node.id;
     if (!isEditor) return;
     if (node.id === selectedId) element.classList.add('is-selected');
-    if (areIdsVisible) element.append(createElement('span', { className: 'editor-id-badge', text: node.id }));
+    const isArea = !node.type;
+    if (areIdsVisible && isArea) element.append(createElement('span', { className: 'editor-id-badge', text: node.id }));
   };
 
   /**

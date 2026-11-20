@@ -2,14 +2,15 @@
 import { createElement } from '../utils/dom.js';
 import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import { WIDGET_TYPES } from '../model/catalog.js';
-import { countStyleUsers, createId } from '../model/document.js';
+import { countStyleUsers, createId, insertWidget } from '../model/document.js';
+import { buildTemplate, TEMPLATE_CATEGORIES } from '../model/templates.js';
 import { getIconSvg, isIconLibraryLoaded, loadIconLibrary, searchIcons } from '../render/iconLibrary.js';
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
 import { startLibraryDrag } from './canvasView.js';
-import { applyIconFromLibrary } from './editorActions.js';
+import { applyIconFromLibrary, findDefaultHolderId } from './editorActions.js';
 
 const RIGHT_SECTIONS = [
-  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'icons', label: 'Icônes' },
+  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'templates', label: 'Modèles' }, { value: 'icons', label: 'Icônes' },
   { value: 'styles', label: 'Styles partagés' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
@@ -57,6 +58,34 @@ function createWidgetLibrary() {
     createPanelSection('Widgets perso', componentTiles.length
       ? [createElement('div', { className: 'library-grid' }, componentTiles), ...componentManagement]
       : [createElement('div', { className: 'panel-hint', text: 'Aucun pour l\'instant. Sélectionne un widget (ou un conteneur rempli) puis « → Widget perso » à gauche.' })]),
+  ];
+}
+
+/**
+ * Applique un modèle : nouvel écran (affiché), groupe de widgets (dans l'area sélectionnée) ou thèmes.
+ * @param {string} categoryKey catégorie
+ * @param {string} templateKey modèle
+ */
+function applyTemplate(categoryKey, templateKey) {
+  const holderId = categoryKey === 'widgets' ? findDefaultHolderId() : null;
+  if (categoryKey === 'widgets' && !holderId) { alert('Sélectionne d\'abord une area qui contient des widgets (pas une area découpée).'); return; }
+  let nodeToSelect = null;
+  commitChange((uiDocument) => {
+    const { createdNode } = buildTemplate(uiDocument, categoryKey, templateKey);
+    if (categoryKey === 'screen') { uiDocument.screens.push(createdNode); nodeToSelect = createdNode.id; appState.currentScreenId = createdNode.id; }
+    else if (categoryKey === 'widgets') { insertWidget(uiDocument, holderId, createdNode); nodeToSelect = createdNode.id; }
+    else { appState.currentThemeId = createdNode; }
+  });
+  if (nodeToSelect) selectNode(nodeToSelect);
+}
+
+/** @returns {HTMLElement[]} contenu de la section Modèles */
+function createTemplatesView() {
+  return [
+    createElement('div', { className: 'panel-hint', text: 'Pour essayer vite. Chaque modèle crée de nouveaux éléments avec leurs propres ID (annulable).' }),
+    ...TEMPLATE_CATEGORIES.map((category) => createPanelSection(category.label, Object.entries(category.templates).map(([templateKey, template]) => createElement('button', {
+      className: 'template-button', attributes: { type: 'button' }, on: { click: () => applyTemplate(category.key, templateKey) },
+    }, [createElement('span', { className: 'library-tile-icon', html: getIconSvg(`lucide:${template.icon}`) }), createElement('span', { text: template.label })])))),
   ];
 }
 
@@ -169,7 +198,7 @@ export function renderRightPanel() {
   const isSearchFocused = activeElement?.type === 'search' && panelBodyElement.contains(activeElement);
   if (isSearchFocused) return;
   const scrollPosition = panelBodyElement.scrollTop;
-  const sectionBuilders = { widgets: createWidgetLibrary, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
+  const sectionBuilders = { widgets: createWidgetLibrary, templates: createTemplatesView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
   panelBodyElement.replaceChildren(...(sectionBuilders[appState.rightPanelSection] ?? createWidgetLibrary)());
   panelBodyElement.scrollTop = scrollPosition;
 }

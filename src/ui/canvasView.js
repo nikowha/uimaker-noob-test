@@ -2,7 +2,7 @@
 // Pencil / souris = outil (sélection, déplacement) ; doigt = navigation (1 doigt glisse, 2 doigts zooment) ;
 // un tap du doigt sélectionne aussi.
 import { createElement } from '../utils/dom.js';
-import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
+import { appSettings, appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import { buildNodeIndex, isWidgetHolder } from '../model/document.js';
 import { renderScreen } from '../render/screenRenderer.js';
 import { moveWidget, placeLibraryItem } from './editorActions.js';
@@ -12,6 +12,10 @@ const MINIMUM_SCALE = 0.05;
 const MAXIMUM_SCALE = 8;
 const FIT_MARGIN_PIXELS = 48;
 const MINIMUM_AREA_SIZE = 24;
+const MINIMUM_WIDGET_SIZE = 4;
+const RESIZE_DIRECTIONS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const ANCHOR_HORIZONTAL_PART = { topLeft: 'left', left: 'left', bottomLeft: 'left', top: 'center', center: 'center', bottom: 'center', topRight: 'right', right: 'right', bottomRight: 'right', stretch: 'stretch' };
+const ANCHOR_VERTICAL_PART = { topLeft: 'top', top: 'top', topRight: 'top', left: 'center', center: 'center', right: 'center', bottomLeft: 'bottom', bottom: 'bottom', bottomRight: 'bottom', stretch: 'stretch' };
 
 const viewTransform = { offsetX: 0, offsetY: 0, scale: 1 };
 const activePointers = new Map();
@@ -19,10 +23,12 @@ let currentGesture = null;
 let viewportElement = null;
 let stageElement = null;
 let lastFittedScreenKey = null;
+let overlayElement = null;
 
 /** Applique le zoom / déplacement courant à la scène. */
 function applyViewTransform() {
   stageElement.style.transform = `translate(${viewTransform.offsetX}px, ${viewTransform.offsetY}px) scale(${viewTransform.scale})`;
+  stageElement.style.setProperty('--inverse-scale', String(1 / viewTransform.scale));
 }
 
 /** @returns {object|undefined} écran courant */
@@ -57,6 +63,171 @@ function zoomAroundPoint(newScale, pivotX, pivotY) {
   applyViewTransform();
 }
 
+/**
+ * Convertit le rectangle d'un élément en coordonnées de la scène (indépendantes du zoom).
+ * @param {Element} element élément
+ * @returns {{x: number, y: number, width: number, height: number}} rectangle
+ */
+function measureInStage(element) {
+  const stageRectangle = stageElement.getBoundingClientRect();
+  const elementRectangle = element.getBoundingClientRect();
+  return {
+    x: (elementRectangle.left - stageRectangle.left) / viewTransform.scale, y: (elementRectangle.top - stageRectangle.top) / viewTransform.scale,
+    width: elementRectangle.width / viewTransform.scale, height: elementRectangle.height / viewTransform.scale,
+  };
+}
+
+/**
+ * Crée les poignées : une poignée (avec l'ID) au-dessus de chaque widget pour le sélectionner / déplacer,
+ * et 8 poignées de redimensionnement autour du widget sélectionné. Taille constante à l'écran (réglages de l'app).
+ * @param {HTMLElement} screenElement rendu de l'écran
+ */
+function buildWidgetHandles(screenElement) {
+  for (const widgetElement of screenElement.querySelectorAll('.ui-widget[data-node-id]')) {
+    const widgetId = widgetElement.dataset.nodeId;
+    const widgetBox = measureInStage(widgetElement);
+    const isSelected = widgetId === appState.selectedId;
+    overlayElement.append(createElement('div', {
+      className: `editor-widget-handle${isSelected ? ' is-selected' : ''}`, text: widgetId,
+      dataset: { handleWidgetId: widgetId }, style: { left: `${widgetBox.x}px`, top: `${widgetBox.y}px` },
+    }));
+    if (!isSelected) continue;
+    for (const resizeDirection of RESIZE_DIRECTIONS) {
+      const handleX = widgetBox.x + (resizeDirection.includes('w') ? 0 : resizeDirection.includes('e') ? widgetBox.width : widgetBox.width / 2);
+      const handleY = widgetBox.y + (resizeDirection.includes('n') ? 0 : resizeDirection.includes('s') ? widgetBox.height : widgetBox.height / 2);
+      overlayElement.append(createElement('div', {
+        className: `editor-resize-handle is-${resizeDirection}`,
+        dataset: { resizeWidgetId: widgetId, resizeDirection }, style: { left: `${handleX}px`, top: `${handleY}px` },
+      }));
+    }
+  }
+}
+
+/**
+ * Prépare le redimensionnement d'un widget par une poignée.
+ * @param {HTMLElement} handleElement poignée de redimensionnement
+ * @param {PointerEvent} pointerEvent pointerdown
+ * @returns {object} geste
+ */
+function createResizeGesture(handleElement, pointerEvent) {
+  const widgetId = handleElement.dataset.resizeWidgetId;
+  const widgetElement = stageElement.querySelector(`.ui-screen [data-node-id="${widgetId}"]`);
+  const widgetBox = measureInStage(widgetElement);
+  return {
+    kind: 'resize', pointerId: pointerEvent.pointerId, widgetId, widgetElement, direction: handleElement.dataset.resizeDirection,
+    isFreeLayout: widgetElement.parentElement?.dataset.layoutMode === 'free',
+    startX: pointerEvent.clientX, startY: pointerEvent.clientY, startWidth: widgetBox.width, startHeight: widgetBox.height,
+    newWidth: null, newHeight: null,
+  };
+}
+
+/**
+ * Met à jour l'aperçu pendant un redimensionnement.
+ * @param {object} resizeGesture geste
+ * @param {PointerEvent} pointerEvent pointermove
+ */
+function updateResizeGesture(resizeGesture, pointerEvent) {
+  const deltaX = (pointerEvent.clientX - resizeGesture.startX) / viewTransform.scale;
+  const deltaY = (pointerEvent.clientY - resizeGesture.startY) / viewTransform.scale;
+  const { direction, widgetElement } = resizeGesture;
+  if (direction.includes('e') || direction.includes('w')) {
+    resizeGesture.newWidth = Math.max(MINIMUM_WIDGET_SIZE, resizeGesture.startWidth + (direction.includes('e') ? deltaX : -deltaX));
+    widgetElement.style.width = `${resizeGesture.newWidth}px`;
+    widgetElement.style.flex = 'none';
+  }
+  if (direction.includes('n') || direction.includes('s')) {
+    resizeGesture.newHeight = Math.max(MINIMUM_WIDGET_SIZE, resizeGesture.startHeight + (direction.includes('s') ? deltaY : -deltaY));
+    widgetElement.style.height = `${resizeGesture.newHeight}px`;
+    widgetElement.style.flex = 'none';
+  }
+  if (resizeGesture.isFreeLayout) {
+    const shiftX = direction.includes('w') ? resizeGesture.startWidth - (resizeGesture.newWidth ?? resizeGesture.startWidth) : 0;
+    const shiftY = direction.includes('n') ? resizeGesture.startHeight - (resizeGesture.newHeight ?? resizeGesture.startHeight) : 0;
+    widgetElement.style.translate = `${shiftX}px ${shiftY}px`;
+  }
+}
+
+/**
+ * Calcule le nouveau décalage libre sur un axe après redimensionnement, selon l'ancrage.
+ * @param {number} offset décalage actuel (x ou y)
+ * @param {string} anchorPart partie de l'ancrage sur cet axe (left/top, center, right/bottom, stretch)
+ * @param {boolean} isStartSide vrai si on a tiré le côté gauche / haut
+ * @param {number} sizeDelta variation de taille
+ * @returns {number} nouveau décalage
+ */
+function computeOffsetAfterResize(offset, anchorPart, isStartSide, sizeDelta) {
+  if (anchorPart === 'left' || anchorPart === 'top') return isStartSide ? offset - sizeDelta : offset;
+  if (anchorPart === 'right' || anchorPart === 'bottom') return isStartSide ? offset : offset - sizeDelta;
+  if (anchorPart === 'center') return offset + (isStartSide ? -sizeDelta / 2 : sizeDelta / 2);
+  return offset;
+}
+
+/**
+ * Enregistre la nouvelle taille (en px fixes) et, en mode libre, le décalage qui garde le côté opposé en place.
+ * @param {object} resizeGesture geste terminé
+ */
+function commitResizeGesture(resizeGesture) {
+  if (resizeGesture.newWidth === null && resizeGesture.newHeight === null) { notifyChange(); return; }
+  commitChange((uiDocument) => {
+    const widget = buildNodeIndex(uiDocument).get(resizeGesture.widgetId)?.node;
+    if (!widget) return;
+    widget.size ??= {};
+    const { direction } = resizeGesture;
+    const placement = widget.placement ?? { anchor: 'topLeft', x: 0, y: 0 };
+    const anchorName = placement.anchor ?? 'topLeft';
+    if (resizeGesture.newWidth !== null) {
+      widget.size.width = Math.round(resizeGesture.newWidth);
+      if (resizeGesture.isFreeLayout) placement.x = Math.round(computeOffsetAfterResize(placement.x ?? 0, ANCHOR_HORIZONTAL_PART[anchorName], direction.includes('w'), resizeGesture.newWidth - resizeGesture.startWidth));
+    }
+    if (resizeGesture.newHeight !== null) {
+      widget.size.height = Math.round(resizeGesture.newHeight);
+      if (resizeGesture.isFreeLayout) placement.y = Math.round(computeOffsetAfterResize(placement.y ?? 0, ANCHOR_VERTICAL_PART[anchorName], direction.includes('n'), resizeGesture.newHeight - resizeGesture.startHeight));
+    }
+    if (resizeGesture.isFreeLayout) widget.placement = placement;
+  });
+}
+
+/**
+ * Liste les positions (px écran, axe du séparateur) des autres séparateurs de même sens, pour l'aimantation.
+ * @param {HTMLElement} draggedSplitter séparateur déplacé
+ * @param {boolean} isHorizontal vrai pour un séparateur vertical (areas côte à côte)
+ * @returns {number[]} positions
+ */
+function collectSnapTargets(draggedSplitter, isHorizontal) {
+  const orientationClass = isHorizontal ? '.ui-splitter.is-horizontal' : '.ui-splitter.is-vertical';
+  return [...stageElement.querySelectorAll(orientationClass)]
+    .filter((splitterElement) => splitterElement !== draggedSplitter)
+    .map((splitterElement) => {
+      const splitterRectangle = splitterElement.getBoundingClientRect();
+      return isHorizontal ? splitterRectangle.left : splitterRectangle.top;
+    });
+}
+
+/**
+ * Affiche ou cache le repère d'aimantation.
+ * @param {number|null} clientPosition position du repère (px écran) ou null pour le cacher
+ * @param {boolean} isHorizontal sens du séparateur
+ */
+function showSnapGuide(clientPosition, isHorizontal) {
+  overlayElement.querySelector('.editor-snap-guide')?.remove();
+  if (clientPosition === null) return;
+  const stageRectangle = stageElement.getBoundingClientRect();
+  const screenElement = stageElement.querySelector('.ui-screen');
+  const stagePosition = (clientPosition - (isHorizontal ? stageRectangle.left : stageRectangle.top)) / viewTransform.scale;
+  overlayElement.append(createElement('div', {
+    className: `editor-snap-guide ${isHorizontal ? 'is-vertical-line' : 'is-horizontal-line'}`,
+    style: isHorizontal ? { left: `${stagePosition}px`, height: `${screenElement.offsetHeight}px` } : { top: `${stagePosition}px`, width: `${screenElement.offsetWidth}px` },
+  }));
+}
+
+/**
+ * Cache les poignées pendant un déplacement / redimensionnement (elles ne suivent pas l'aperçu).
+ * @param {boolean} isActive vrai pendant le geste
+ */
+function setGestureActive(isActive) {
+  viewportElement.classList.toggle('is-gesture-active', isActive);
+}
+
 /** Redessine l'écran courant (après chaque changement). */
 export function renderCanvasView() {
   const screen = getCurrentScreen();
@@ -70,7 +241,11 @@ export function renderCanvasView() {
   const screenElement = renderScreen(appState.uiDocument, screen, {
     themeId: appState.currentThemeId, isEditor: true, areIdsVisible: appState.areIdsVisible, selectedId: appState.selectedId,
   });
-  stageElement.append(screenTitle, screenElement);
+  overlayElement = createElement('div', { className: 'editor-overlay' });
+  stageElement.append(screenTitle, screenElement, overlayElement);
+  stageElement.style.setProperty('--handle-size', String(appSettings.handleSize));
+  stageElement.style.setProperty('--resize-handle-size', String(appSettings.resizeHandleSize));
+  buildWidgetHandles(screenElement);
   viewportElement.classList.toggle('is-placing', Boolean(appState.armedLibraryItem));
   const screenKey = `${screen.id}:${screen.size.width}x${screen.size.height}`;
   if (screenKey !== lastFittedScreenKey) {
@@ -89,7 +264,7 @@ export function renderCanvasView() {
 function findDropHolder(clientX, clientY, excludedWidgetId) {
   const nodeIndex = buildNodeIndex(appState.uiDocument);
   for (const hitElement of document.elementsFromPoint(clientX, clientY)) {
-    if (!stageElement.contains(hitElement)) continue;
+    if (!stageElement.contains(hitElement) || overlayElement?.contains(hitElement)) continue;
     let candidateElement = hitElement.closest('[data-node-id]');
     while (candidateElement && stageElement.contains(candidateElement)) {
       const candidateId = candidateElement.dataset.nodeId;
@@ -243,6 +418,8 @@ function createSplitterGesture(splitterElement, pointerEvent) {
     nextStartSize: (isHorizontal ? nextRectangle.width : nextRectangle.height) / viewTransform.scale,
     parentSize: (isHorizontal ? parentRectangle.width : parentRectangle.height) / viewTransform.scale,
     newPreviousSize: null,
+    previousStartClient: isHorizontal ? previousRectangle.left : previousRectangle.top,
+    snapTargets: collectSnapTargets(splitterElement, isHorizontal),
   };
 }
 
@@ -355,11 +532,14 @@ function handlePointerDown(pointerEvent) {
   }
   if (currentGesture) return;
   const startPoint = { pointerId: pointerEvent.pointerId, startX: pointerEvent.clientX, startY: pointerEvent.clientY, lastX: pointerEvent.clientX, lastY: pointerEvent.clientY };
+  const handleElement = pointerEvent.target instanceof Element ? pointerEvent.target.closest('.editor-widget-handle, .editor-resize-handle') : null;
+  if (handleElement?.dataset.resizeWidgetId) { currentGesture = createResizeGesture(handleElement, pointerEvent); setGestureActive(true); return; }
+  if (handleElement?.dataset.handleWidgetId) { currentGesture = createWidgetGesture(handleElement.dataset.handleWidgetId, pointerEvent); return; }
   if (pointerEvent.pointerType === 'touch') { currentGesture = { kind: 'pendingTouch', target: pointerEvent.target, ...startPoint }; return; }
   if (pointerEvent.button === 1 || pointerEvent.button === 2) { currentGesture = { kind: 'pan', ...startPoint }; return; }
   if (appState.armedLibraryItem) { currentGesture = { kind: 'pendingPlace', ...startPoint }; return; }
   const splitterElement = pointerEvent.target instanceof Element ? pointerEvent.target.closest('.ui-splitter') : null;
-  if (splitterElement) { currentGesture = createSplitterGesture(splitterElement, pointerEvent); return; }
+  if (splitterElement) { currentGesture = createSplitterGesture(splitterElement, pointerEvent); setGestureActive(true); return; }
   const hitNodeId = findHitNodeId(pointerEvent.target);
   const hitRecord = hitNodeId ? buildNodeIndex(appState.uiDocument).get(hitNodeId) : null;
   if (hitRecord?.kind === 'widget') { currentGesture = createWidgetGesture(hitNodeId, pointerEvent); return; }
@@ -404,6 +584,7 @@ function handlePointerMove(pointerEvent) {
   } else if (currentGesture.kind === 'pendingWidget' && movedDistance > DRAG_THRESHOLD_PIXELS) {
     currentGesture.kind = 'dragWidget';
     currentGesture.widgetElement.classList.add('is-dragging');
+    setGestureActive(true);
   }
   if (currentGesture.kind === 'dragWidget') {
     const baseTransform = currentGesture.baseTransform ??= currentGesture.widgetElement.style.transform || '';
@@ -415,7 +596,13 @@ function handlePointerMove(pointerEvent) {
     const coordinate = currentGesture.isHorizontal ? pointerEvent.clientX : pointerEvent.clientY;
     const newSize = Math.max(MINIMUM_AREA_SIZE, currentGesture.previousStartSize + (coordinate - currentGesture.startCoordinate) / viewTransform.scale);
     currentGesture.newPreviousSize = Math.min(newSize, currentGesture.previousStartSize + currentGesture.nextStartSize - MINIMUM_AREA_SIZE);
+    const splitterClientPosition = currentGesture.previousStartClient + currentGesture.newPreviousSize * viewTransform.scale;
+    const snapTarget = currentGesture.snapTargets.find((targetPosition) => Math.abs(targetPosition - splitterClientPosition) <= appSettings.snapDistance);
+    if (snapTarget !== undefined) currentGesture.newPreviousSize = (snapTarget - currentGesture.previousStartClient) / viewTransform.scale;
+    showSnapGuide(snapTarget ?? null, currentGesture.isHorizontal);
     currentGesture.previousElement.style.flex = `0 0 ${currentGesture.newPreviousSize}px`;
+  } else if (currentGesture.kind === 'resize') {
+    updateResizeGesture(currentGesture, pointerEvent);
   }
 }
 
@@ -434,6 +621,7 @@ function handlePointerEnd(pointerEvent) {
   const finishedGesture = currentGesture;
   currentGesture = null;
   const isCancelled = pointerEvent.type === 'pointercancel';
+  setGestureActive(false);
   highlightDropHolder(null);
   if (isCancelled) { notifyChange(); return; }
   if (finishedGesture.kind === 'pendingTouch') {
@@ -449,6 +637,8 @@ function handlePointerEnd(pointerEvent) {
     finishWidgetDrag(finishedGesture, pointerEvent.clientX, pointerEvent.clientY);
   } else if (finishedGesture.kind === 'splitter') {
     commitSplitterGesture(finishedGesture);
+  } else if (finishedGesture.kind === 'resize') {
+    commitResizeGesture(finishedGesture);
     if (finishedGesture.newPreviousSize === null) selectNode(finishedGesture.splitParentId);
   }
 }
@@ -489,5 +679,6 @@ export function createCanvasView() {
     wheel: handleWheel, contextmenu: (contextEvent) => contextEvent.preventDefault(),
   } }, [stageElement]);
   new ResizeObserver(() => { if (!currentGesture) fitScreenInView(); }).observe(viewportElement);
+  viewportElement.addEventListener('scroll', () => { viewportElement.scrollLeft = 0; viewportElement.scrollTop = 0; });
   return viewportElement;
 }

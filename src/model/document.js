@@ -103,56 +103,21 @@ export function createWidget(uiDocument, widgetType) {
 }
 
 /**
- * Crée le projet de départ (2 thèmes, variables de couleur, un écran de démonstration).
+ * Crée un projet complètement vide : un écran vide, un seul thème, aucune variable, aucun style, aucun widget.
  * @returns {object} document
  */
-export function createDefaultDocument() {
+export function createEmptyDocument() {
   const uiDocument = {
     format: UISPEC_FORMAT, formatVersion: UISPEC_FORMAT_VERSION, generator: GENERATOR_NAME,
     project: { name: 'MyApp', notes: '', defaultTheme: 'H1', idCounters: {},
       defaults: { areaSizing: { mode: 'fill' }, resizableSplitter: false } },
     themes: {}, colorVariables: {}, styles: {}, icons: {}, components: {}, screens: [],
   };
-  const darkThemeId = createId(uiDocument, 'H');
-  const lightThemeId = createId(uiDocument, 'H');
-  uiDocument.themes[darkThemeId] = { name: 'Dark' };
-  uiDocument.themes[lightThemeId] = { name: 'Light' };
-  const variableValues = [
-    ['background', '#1C1D21', '#F4F5F7'], ['surface', '#26282E', '#FFFFFF'], ['textMain', '#ECEDEF', '#15171A'],
-    ['textMuted', '#9A9EA6', '#646A73'], ['accent', '#4C8DFF', '#2563EB'], ['border', '#3A3D45', '#D5D8DE'],
-  ];
-  const variableIdByName = {};
-  for (const [variableName, darkValue, lightValue] of variableValues) {
-    const variableId = createId(uiDocument, 'V');
-    variableIdByName[variableName] = variableId;
-    uiDocument.colorVariables[variableId] = { name: variableName, values: { [darkThemeId]: darkValue, [lightThemeId]: lightValue } };
-  }
-  const panelStyleId = createId(uiDocument, 'T');
-  uiDocument.styles[panelStyleId] = { name: 'PanelStyle', appliesTo: 'area', background: `$${variableIdByName.surface}`,
-    borderWidth: 1, borderColor: `$${variableIdByName.border}` };
-
+  const themeId = createId(uiDocument, 'H');
+  uiDocument.themes[themeId] = { name: 'Default' };
+  uiDocument.project.defaultTheme = themeId;
   const screen = createScreen(uiDocument, '16:9-small');
   screen.name = 'MainScreen';
-  const rootArea = screen.root;
-  delete rootArea.widgetLayout; delete rootArea.widgets;
-  rootArea.split = 'horizontal';
-  const sidebarArea = createLeafArea(uiDocument, 'Sidebar');
-  sidebarArea.sizing = { mode: 'fixed', size: 260, min: 200, max: 400 };
-  sidebarArea.resizableSplitter = true;
-  sidebarArea.style = panelStyleId;
-  const mainArea = createLeafArea(uiDocument, 'MainView');
-  mainArea.widgetLayout = { mode: 'free' };
-  rootArea.children = [sidebarArea, mainArea];
-
-  const titleWidget = createWidget(uiDocument, 'text');
-  Object.assign(titleWidget, { name: 'AppTitle', content: { text: 'My App', textRole: 'title', align: 'start' } });
-  const openButton = createWidget(uiDocument, 'button');
-  Object.assign(openButton, { name: 'OpenButton', content: { label: 'Open', icon: 'lucide:folder-open', iconPosition: 'start' } });
-  sidebarArea.widgets.push(titleWidget, openButton);
-  const viewPlaceholder = createWidget(uiDocument, 'placeholder');
-  Object.assign(viewPlaceholder, { name: 'MainViewport', placement: { anchor: 'stretch', x: 16, y: 16 },
-    content: { description: 'Vue principale codée plus tard (ex. vue 3D)' } });
-  mainArea.widgets.push(viewPlaceholder);
   uiDocument.screens.push(screen);
   return uiDocument;
 }
