@@ -86,6 +86,7 @@ const WIDGET_GROUP_TEMPLATES = {
       name: `${iconName.replace(/(^|-)(\w)/g, (unusedMatch, unusedDash, letter) => letter.toUpperCase()).replace(/\d/g, '')}Button`,
       content: { label: '', icon: `lucide:${iconName}`, iconPosition: 'only' }, size: { width: 32, height: 32 } })),
   }) },
+  listWithContextMenu: { label: 'Liste avec menu contextuel', icon: 'mouse-pointer-click', build: buildListWithContextMenu },
   dataTable: { label: 'Tableau', icon: 'table', build: (uiDocument) => buildWidget(uiDocument, 'table', {
     name: 'AssetTable', size: { width: 'fill', height: 200 },
     content: { columns: [{ label: 'Name', width: 'fill' }, { label: 'Type', width: 64 }, { label: 'Size', width: 60 }],
@@ -173,6 +174,167 @@ function buildSettingsWindow(uiDocument) {
     ]), { platform: 'macos', size: { width: 900, height: 600 } });
 }
 
+/**
+ * Crée un élément de menu.
+ * @param {string} label texte
+ * @param {string} shortcut raccourci (ex. « Ctrl+S »)
+ * @param {string} iconName nom Lucide (sans préfixe) ou ''
+ * @param {object} [action] action (perso décrite par défaut)
+ * @returns {object} élément
+ */
+function buildMenuItem(label, shortcut, iconName, action) {
+  return { label, shortcut, icon: iconName ? `lucide:${iconName}` : '', action: action ?? { type: 'custom', description: label } };
+}
+
+const MENU_SEPARATOR = { separator: true };
+
+/**
+ * Ajoute un menu réutilisable (barre de menus / clic droit) au document.
+ * @param {object} uiDocument document
+ * @param {string} name nom anglais
+ * @param {object[]} items éléments
+ * @returns {string} ID du menu (M…)
+ */
+function addMenu(uiDocument, name, items) {
+  uiDocument.menus ??= {};
+  const menuId = createId(uiDocument, 'M');
+  uiDocument.menus[menuId] = { name, items };
+  return menuId;
+}
+
+/**
+ * Cherche un widget par son nom dans un arbre (pour relier un modèle à un autre).
+ * @param {object} rootNode area ou widget
+ * @param {string} widgetName nom cherché
+ * @returns {object|null} widget
+ */
+function findWidgetByName(rootNode, widgetName) {
+  for (const childNode of [...(rootNode.children ?? []), ...(rootNode.widgets ?? [])]) {
+    if (childNode.name === widgetName) return childNode;
+    const foundWidget = findWidgetByName(childNode, widgetName);
+    if (foundWidget) return foundWidget;
+  }
+  return null;
+}
+
+/**
+ * App de bureau avec une vraie barre de menus (File / Edit / View / Help), des menus contextuels au clic droit
+ * et « Edit → Options… » qui ouvre la fenêtre de réglages en dialogue. Ajoute 2 écrans.
+ * @param {object} uiDocument document
+ * @returns {object[]} [écran principal, fenêtre de réglages]
+ */
+function buildMenuApp(uiDocument) {
+  const settingsScreen = buildSettingsWindow(uiDocument);
+  settingsScreen.name = 'OptionsDialog';
+  for (const buttonName of ['CancelButton', 'SaveButton']) {
+    const dialogButton = findWidgetByName(settingsScreen.root, buttonName);
+    if (dialogButton) dialogButton.action = { type: 'closeDialog' };
+  }
+  const openOptions = { type: 'openDialog', target: settingsScreen.id };
+  const fileMenuId = addMenu(uiDocument, 'FileMenu', [
+    buildMenuItem('New', 'Ctrl+N', 'file-plus'), buildMenuItem('Open…', 'Ctrl+O', 'folder-open'),
+    { ...buildMenuItem('Open recent', '', ''), submenu: [buildMenuItem('Robot.glb', '', ''), buildMenuItem('House.blend', '', '')] },
+    MENU_SEPARATOR, buildMenuItem('Save', 'Ctrl+S', 'save'), buildMenuItem('Save as…', 'Ctrl+Shift+S', ''),
+    MENU_SEPARATOR, buildMenuItem('Quit', 'Ctrl+Q', 'log-out'),
+  ]);
+  const editMenuId = addMenu(uiDocument, 'EditMenu', [
+    buildMenuItem('Undo', 'Ctrl+Z', 'undo-2'), buildMenuItem('Redo', 'Ctrl+Y', 'redo-2'), MENU_SEPARATOR,
+    buildMenuItem('Cut', 'Ctrl+X', 'scissors'), buildMenuItem('Copy', 'Ctrl+C', 'copy'), buildMenuItem('Paste', 'Ctrl+V', 'clipboard-paste'),
+    MENU_SEPARATOR, buildMenuItem('Options…', 'Ctrl+,', 'settings', openOptions),
+  ]);
+  const workspaceContextMenuId = addMenu(uiDocument, 'WorkspaceContextMenu', [
+    buildMenuItem('Cut', 'Ctrl+X', 'scissors'), buildMenuItem('Copy', 'Ctrl+C', 'copy'), buildMenuItem('Paste', 'Ctrl+V', 'clipboard-paste'),
+    MENU_SEPARATOR, buildMenuItem('Delete', 'Del', 'trash'), MENU_SEPARATOR, buildMenuItem('Options…', '', 'settings', openOptions),
+  ]);
+  const outlinerContextMenuId = addMenu(uiDocument, 'OutlinerContextMenu', [
+    buildMenuItem('Rename', 'F2', 'pencil'), buildMenuItem('Duplicate', 'Ctrl+D', 'copy'), MENU_SEPARATOR, buildMenuItem('Delete', 'Del', 'trash'),
+  ]);
+  const outlinerList = buildWidget(uiDocument, 'list', { name: 'OutlinerList', size: { width: 'fill', height: 'fill' },
+    content: { items: [{ label: 'Camera', icon: 'lucide:video' }, { label: 'Light', icon: 'lucide:lightbulb' }, { label: 'Cube', icon: 'lucide:box' }] },
+    events: [{ trigger: 'rightClick', action: { type: 'openContextMenu', menuId: outlinerContextMenuId } }] });
+  const viewMenuId = addMenu(uiDocument, 'ViewMenu', [
+    buildMenuItem('Zoom in', 'Ctrl++', 'zoom-in'), buildMenuItem('Zoom out', 'Ctrl+-', 'zoom-out'), MENU_SEPARATOR,
+    { ...buildMenuItem('Show outliner', '', '', { type: 'toggleVisibility', target: outlinerList.id }), checked: true },
+  ]);
+  const helpMenuId = addMenu(uiDocument, 'HelpMenu', [buildMenuItem('Documentation', 'F1', 'book-open'), buildMenuItem('About', '', 'info')]);
+  const mainScreen = buildScreen(uiDocument, '16:9-small', 'MenuAppMainWindow',
+    () => buildSplitArea(uiDocument, 'Root', 'vertical', null, [
+      buildLeafArea(uiDocument, 'MenuArea', { mode: 'fixed', size: 28 }, { ...HORIZONTAL_BAR, padding: [0, 0, 0, 0] }, [
+        buildWidget(uiDocument, 'menuBar', { name: 'MainMenuBar', content: { menus: [
+          { label: 'File', menuId: fileMenuId }, { label: 'Edit', menuId: editMenuId }, { label: 'View', menuId: viewMenuId }, { label: 'Help', menuId: helpMenuId },
+        ] } }),
+      ]),
+      buildSplitArea(uiDocument, 'WorkArea', 'horizontal', { mode: 'fill' }, [
+        buildLeafArea(uiDocument, 'OutlinerPanel', { mode: 'fixed', size: 220, min: 160, max: 360 }, VERTICAL_STACK, [
+          buildWidget(uiDocument, 'text', { name: 'OutlinerTitle', content: { text: 'Outliner', textRole: 'subtitle' } }), outlinerList,
+        ], { resizableSplitter: true, styleOverrides: PANEL_LOOK }),
+        buildLeafArea(uiDocument, 'WorkspaceArea', { mode: 'fill' }, { mode: 'free' }, [
+          buildWidget(uiDocument, 'placeholder', { name: 'Workspace', placement: { anchor: 'stretch', x: 0, y: 0 },
+            content: { description: 'Zone de travail — clic droit (ou appui long) : menu contextuel' },
+            events: [{ trigger: 'rightClick', action: { type: 'openContextMenu', menuId: workspaceContextMenuId } }] }),
+        ]),
+      ]),
+      buildLeafArea(uiDocument, 'StatusBarArea', { mode: 'fixed', size: 24 }, { ...HORIZONTAL_BAR, padding: [0, 8, 0, 8] },
+        [buildWidget(uiDocument, 'text', { name: 'StatusText', content: { text: 'File / Edit / View / Help : menus · clic droit : menu contextuel · Edit › Options… : dialogue', textRole: 'caption' } })]),
+    ]));
+  return [mainScreen, settingsScreen];
+}
+
+/**
+ * App de dessin iPad : outils, toile, calques. Double tap du Pencil = changer d'outil, squeeze = palette d'outils,
+ * appui long sur la toile = menu contextuel.
+ * @param {object} uiDocument document
+ * @returns {object} écran
+ */
+function buildDrawingApp(uiDocument) {
+  const canvasMenuId = addMenu(uiDocument, 'CanvasContextMenu', [
+    buildMenuItem('Undo', '', 'undo-2'), buildMenuItem('Redo', '', 'redo-2'), MENU_SEPARATOR, buildMenuItem('Clear canvas', '', 'trash'),
+  ]);
+  const toolPaletteMenuId = addMenu(uiDocument, 'ToolPaletteMenu', [
+    buildMenuItem('Brush', '', 'brush'), buildMenuItem('Pencil', '', 'pencil'), buildMenuItem('Eraser', '', 'eraser'), buildMenuItem('Lasso', '', 'lasso'),
+    MENU_SEPARATOR, buildMenuItem('Colors…', '', 'palette'),
+  ]);
+  const toolButton = (iconName, toolName) => buildWidget(uiDocument, 'button', { name: `${toolName}ToolButton`,
+    content: { label: '', icon: `lucide:${iconName}`, iconPosition: 'only' }, size: { width: 44, height: 44 },
+    action: { type: 'custom', description: `Outil : ${toolName}` } });
+  const screen = buildScreen(uiDocument, 'ipad', 'DrawingScreen',
+    () => buildSplitArea(uiDocument, 'Root', 'horizontal', null, [
+      buildLeafArea(uiDocument, 'ToolsArea', { mode: 'fixed', size: 64 }, { ...VERTICAL_STACK, alignCross: 'center', padding: [24, 8, 8, 8] },
+        [toolButton('brush', 'Brush'), toolButton('eraser', 'Eraser'), toolButton('lasso', 'Lasso'), toolButton('undo-2', 'Undo')], { styleOverrides: PANEL_LOOK }),
+      buildLeafArea(uiDocument, 'CanvasArea', { mode: 'fill' }, { mode: 'free' }, [
+        buildWidget(uiDocument, 'placeholder', { name: 'DrawingCanvas', placement: { anchor: 'stretch', x: 0, y: 0 },
+          content: { description: 'Toile de dessin (codée plus tard) — appui long : menu ; double tap Pencil : pinceau ↔ gomme ; squeeze : palette' },
+          events: [{ trigger: 'longPress', action: { type: 'openContextMenu', menuId: canvasMenuId } }] }),
+      ]),
+      buildLeafArea(uiDocument, 'LayersArea', { mode: 'fixed', size: 220 }, { ...VERTICAL_STACK, padding: [24, 12, 12, 12] }, [
+        buildWidget(uiDocument, 'text', { name: 'LayersTitle', content: { text: 'Layers', textRole: 'subtitle' } }),
+        buildWidget(uiDocument, 'list', { name: 'LayerList', size: { width: 'fill', height: 'fill' },
+          content: { items: [{ label: 'Sketch', icon: '' }, { label: 'Ink', icon: '' }, { label: 'Colors', icon: '' }] } }),
+      ], { styleOverrides: PANEL_LOOK }),
+    ]));
+  screen.events = [
+    { trigger: 'pencilDoubleTap', action: { type: 'custom', description: 'Basculer pinceau ↔ gomme' } },
+    { trigger: 'pencilSqueeze', action: { type: 'openContextMenu', menuId: toolPaletteMenuId } },
+  ];
+  return screen;
+}
+
+/**
+ * Liste avec menu contextuel au clic droit / appui long (groupe de widgets).
+ * @param {object} uiDocument document
+ * @returns {object} widget
+ */
+function buildListWithContextMenu(uiDocument) {
+  const listMenuId = addMenu(uiDocument, 'FileListContextMenu', [
+    buildMenuItem('Open', 'Enter', 'folder-open'), buildMenuItem('Rename', 'F2', 'pencil'), buildMenuItem('Duplicate', 'Ctrl+D', 'copy'),
+    MENU_SEPARATOR, buildMenuItem('Delete', 'Del', 'trash'),
+  ]);
+  return buildWidget(uiDocument, 'list', { name: 'FileList', size: { width: 'fill', height: 160 },
+    content: { items: ['Robot.glb', 'House.blend', 'Spaceship.fbx'].map((itemLabel) => ({ label: itemLabel, icon: 'lucide:file' })) },
+    events: [{ trigger: 'rightClick', action: { type: 'openContextMenu', menuId: listMenuId } }],
+    notes: 'Clic droit (ou appui long) sur la liste : menu contextuel FileListContextMenu.' });
+}
+
 /** Écrans types (ajoutés au projet). */
 const SCREEN_TEMPLATES = {
   desktopApp: { label: 'App de bureau (menus, outils, 3 panneaux, barre d\'état)', icon: 'app-window', build: (uiDocument) => buildScreen(uiDocument, '16:9-small', 'DesktopMainWindow',
@@ -202,6 +364,8 @@ const SCREEN_TEMPLATES = {
       buildLeafArea(uiDocument, 'StatusBarArea', { mode: 'fixed', size: 24 }, { ...HORIZONTAL_BAR, padding: [0, 8, 0, 8] },
         [buildWidget(uiDocument, 'text', { name: 'StatusText', content: { text: 'Ready', textRole: 'caption' } })]),
     ])) },
+  menuApp: { label: 'App avec menus (barre File / Edit…, clic droit, dialogue Options)', icon: 'square-menu', build: buildMenuApp },
+  drawingApp: { label: 'App de dessin iPad (événements du Pencil)', icon: 'brush', build: buildDrawingApp },
   settingsWindow: { label: 'Fenêtre de réglages (la liste change la page de droite)', icon: 'settings-2', build: buildSettingsWindow },
   ipadSplit: { label: 'iPad : liste + détail', icon: 'tablet', build: (uiDocument) => buildScreen(uiDocument, 'ipad', 'IpadMainScreen',
     () => buildSplitArea(uiDocument, 'Root', 'horizontal', null, [

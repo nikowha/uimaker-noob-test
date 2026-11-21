@@ -300,3 +300,37 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
   .top-bar select { max-width: 140px; }
   .project-name { width: 100px; }
 }
+
+/* ---- Événements, actions, menus (éditeur) ---- */
+.action-editor { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 6px; }
+.action-editor > select, .action-editor > input { flex: 1 1 110px; min-width: 0; }
+.event-row { padding: 6px; margin: 6px 0; border: 1px solid var(--editor-border); border-radius: 6px; }
+.event-row-header { display: flex; gap: 4px; }
+.event-row-header > select, .event-row-header > input { flex: 1; min-width: 0; }
+.menu-action-row { padding: 4px 0; border-top: 1px solid var(--editor-border); }
+.side-panel textarea { width: 100%; }
+
+/* ---- Mode test : menus, dialogues, interrupteur Pencil ---- */
+.test-menu-layer { position: fixed; inset: 0; z-index: 1700; pointer-events: none; }
+.test-menu {
+  position: fixed; min-width: 200px; padding: 4px; border-radius: 8px; pointer-events: auto;
+  background: #2a2d33; border: 1px solid #44474f; box-shadow: 0 10px 30px #000a; font-size: 13px;
+}
+.test-menu-item {
+  display: grid; grid-template-columns: 14px 18px 1fr auto; align-items: center; gap: 6px;
+  min-height: 30px; padding: 0 10px 0 6px; border-radius: 5px; cursor: default; -webkit-user-select: none; user-select: none;
+}
+.test-menu-item:hover { background: #3a5ea8; }
+.test-menu-item.is-disabled { opacity: 0.4; }
+.test-menu-item.is-disabled:hover { background: none; }
+.test-menu-icon svg { width: 16px; height: 16px; display: block; }
+.test-menu-shortcut { color: #9a9ea6; font-size: 12px; padding-left: 16px; }
+.test-menu-separator { height: 1px; margin: 4px 6px; background: #44474f; }
+.test-frame .uiw-menu.is-open { background: color-mix(in srgb, var(--ui-accent, #4c8dff) 30%, transparent); border-radius: 4px; }
+.test-frame .uiw-menu { cursor: default; }
+.test-dialog-backdrop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0009; }
+.test-dialog-backdrop > .test-frame { box-shadow: 0 20px 60px #000c; }
+.test-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; padding: 0 6px; border: 1px solid var(--editor-border); border-radius: 6px; min-height: var(--touch-target); }
+.test-toolbar > * { flex: none; }
+.test-toolbar button { white-space: nowrap; }
+.test-toolbar select { max-width: 190px; }

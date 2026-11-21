@@ -8,9 +8,11 @@ import { getIconSvg, isIconLibraryLoaded, loadIconLibrary, searchIcons } from '.
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
 import { startLibraryDrag } from './canvasView.js';
 import { applyIconFromLibrary, findDefaultHolderId } from './editorActions.js';
+import { createActionEditor } from './actionEditor.js';
+import { convertMenuItemsToText, flattenMenuItems, parseMenuText } from '../model/interactions.js';
 
 const RIGHT_SECTIONS = [
-  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'templates', label: 'Modèles' }, { value: 'icons', label: 'Icônes' },
+  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
   { value: 'styles', label: 'Styles partagés' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
@@ -73,7 +75,12 @@ function applyTemplate(categoryKey, templateKey) {
   let nodeToSelect = null;
   commitChange((uiDocument) => {
     const { createdNode } = buildTemplate(uiDocument, categoryKey, templateKey);
-    if (categoryKey === 'screen') { uiDocument.screens.push(createdNode); nodeToSelect = createdNode.id; appState.currentScreenId = createdNode.id; }
+    if (categoryKey === 'screen') {
+      const createdScreens = Array.isArray(createdNode) ? createdNode : [createdNode];
+      uiDocument.screens.push(...createdScreens);
+      nodeToSelect = createdScreens[0].id;
+      appState.currentScreenId = createdScreens[0].id;
+    }
     else if (categoryKey === 'widgets') {
       const holderNode = buildNodeIndex(uiDocument).get(holderId)?.node;
       if (holderNode?.widgetLayout?.mode === 'free') {
@@ -95,6 +102,58 @@ function createTemplatesView() {
     ...TEMPLATE_CATEGORIES.map((category) => createPanelSection(category.label, Object.entries(category.templates).map(([templateKey, template]) => createElement('button', {
       className: 'template-button', attributes: { type: 'button' }, on: { click: () => applyTemplate(category.key, templateKey) },
     }, [createElement('span', { className: 'library-tile-icon', html: getIconSvg(`lucide:${template.icon}`) }), createElement('span', { text: template.label })])))),
+  ];
+}
+
+/**
+ * Modifie un menu de la collection « menus ».
+ * @param {string} menuId menu
+ * @param {(menu: object) => void} mutateMenu modification
+ */
+function updateMenu(menuId, mutateMenu) {
+  commitChange((uiDocument) => { if (uiDocument.menus?.[menuId]) mutateMenu(uiDocument.menus[menuId]); });
+}
+
+/**
+ * Bloc d'édition d'un menu : nom, éléments en texte, action de chaque élément.
+ * @param {string} menuId menu
+ * @param {object} menu menu
+ * @returns {HTMLElement} section
+ */
+function createMenuEditor(menuId, menu) {
+  const nameInput = createElement('input', { attributes: { type: 'text' }, on: { change: () => updateMenu(menuId, (targetMenu) => { targetMenu.name = nameInput.value.trim() || targetMenu.name; }) } });
+  nameInput.value = menu.name;
+  const itemsText = createElement('textarea', { attributes: { rows: 6, placeholder: 'New | Ctrl+N | lucide:file-plus\n---\nOpen recent\n  Project A' },
+    on: { change: () => updateMenu(menuId, (targetMenu) => { targetMenu.items = parseMenuText(itemsText.value, targetMenu.items); }) } });
+  itemsText.value = convertMenuItemsToText(menu.items);
+  const actionRows = flattenMenuItems(menu.items).map(({ menuItem, displayLabel }, itemIndex) => createElement('div', { className: 'menu-action-row' }, [
+    createElement('span', { className: 'field-label', text: displayLabel }),
+    createActionEditor(menuItem.action, (newAction) => updateMenu(menuId, (targetMenu) => {
+      flattenMenuItems(targetMenu.items)[itemIndex].menuItem.action = newAction;
+    })),
+  ]));
+  return createPanelSection(`${menuId} · ${menu.name}`, [
+    createElement('div', { className: 'list-row' }, [createElement('code', { text: menuId }), nameInput,
+      createElement('button', { className: 'is-danger', text: '✕', attributes: { type: 'button', title: 'Supprimer ce menu' },
+        on: { click: () => commitChange((uiDocument) => { delete uiDocument.menus[menuId]; }) } })]),
+    createElement('div', { className: 'panel-hint', text: 'Une ligne par élément : « Texte | raccourci | lucide:icône ». « --- » = séparateur. 2 espaces devant = sous-menu de l\'élément au-dessus.' }),
+    itemsText,
+    createElement('div', { className: 'panel-hint', text: 'Action de chaque élément :' }),
+    ...actionRows,
+  ], false);
+}
+
+/** @returns {HTMLElement[]} contenu de la section Menus */
+function createMenusView() {
+  const menuEntries = Object.entries(appState.uiDocument.menus ?? {});
+  return [
+    createElement('div', { className: 'panel-hint', text: 'Menus réutilisables : une barre de menus les affiche (File, Edit…) et l\'action « Ouvrir un menu contextuel » les ouvre au clic droit / appui long. Testables avec ▶ Tester.' }),
+    ...menuEntries.map(([menuId, menu]) => createMenuEditor(menuId, menu)),
+    createButtonRow([{ label: '+ Nouveau menu', onClick: () => commitChange((uiDocument) => {
+      uiDocument.menus ??= {};
+      const createdMenuId = createId(uiDocument, 'M');
+      uiDocument.menus[createdMenuId] = { name: `Menu${createdMenuId.slice(1)}`, items: [{ label: 'Item', shortcut: '', icon: '', action: { type: 'none' } }] };
+    }) }]),
   ];
 }
 
@@ -207,7 +266,7 @@ export function renderRightPanel() {
   const isSearchFocused = activeElement?.type === 'search' && panelBodyElement.contains(activeElement);
   if (isSearchFocused) return;
   const scrollPosition = panelBodyElement.scrollTop;
-  const sectionBuilders = { widgets: createWidgetLibrary, templates: createTemplatesView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
+  const sectionBuilders = { widgets: createWidgetLibrary, templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
   panelBodyElement.replaceChildren(...(sectionBuilders[appState.rightPanelSection] ?? createWidgetLibrary)());
   panelBodyElement.scrollTop = scrollPosition;
 }

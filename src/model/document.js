@@ -37,7 +37,7 @@ export function recomputeIdCounters(uiDocument) {
       Object.values(value).forEach(visitValue);
     }
   };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'components']) {
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'components', 'menus']) {
     Object.keys(uiDocument[collectionName] ?? {}).forEach(registerId);
   }
   visitValue(uiDocument.screens);
@@ -124,7 +124,7 @@ export function createEmptyDocument() {
     format: UISPEC_FORMAT, formatVersion: UISPEC_FORMAT_VERSION, generator: GENERATOR_NAME,
     project: { name: 'MyApp', notes: '', defaultTheme: 'H1', idCounters: {},
       defaults: { areaSizing: { mode: 'fill' }, resizableSplitter: false } },
-    themes: {}, colorVariables: {}, styles: {}, icons: {}, components: {}, screens: [],
+    themes: {}, colorVariables: {}, styles: {}, icons: {}, components: {}, menus: {}, screens: [],
   };
   const themeId = createId(uiDocument, 'H');
   uiDocument.themes[themeId] = { name: 'Default' };
@@ -412,7 +412,7 @@ export function normalizeImportedDocument(importedValue) {
   const uiDocument = cloneJson(importedValue);
   uiDocument.project ??= { name: 'ImportedApp' };
   uiDocument.project.defaults ??= { areaSizing: { mode: 'fill' }, resizableSplitter: false };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'components']) uiDocument[collectionName] ??= {};
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'components', 'menus']) uiDocument[collectionName] ??= {};
   if (Object.keys(uiDocument.themes).length === 0) uiDocument.themes.H1 = { name: 'Default' };
   if (!uiDocument.themes[uiDocument.project.defaultTheme]) uiDocument.project.defaultTheme = Object.keys(uiDocument.themes)[0];
   for (const record of buildNodeIndex(uiDocument).values()) {

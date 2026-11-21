@@ -8,6 +8,7 @@ import {
   createButtonRow, createCheckboxField, createColorField, createInfoRow, createNumberField, createPanelSection,
   createSelectElement, createSelectField, createSizeField, createTextField,
 } from './fields.js';
+import { createActionEditor, createEventsSection } from './actionEditor.js';
 import {
   copySelectedAppearance, deleteSelection, duplicateSelection, pasteAppearanceOnSelection, splitSelectedArea, updateNode,
 } from './editorActions.js';
@@ -154,7 +155,7 @@ function createScreenProperties(screen) {
     })),
     createNotesField(screen),
     createButtonRow([{ label: 'Supprimer l\'écran', isDanger: true, onClick: deleteSelection }]),
-  ])];
+  ]), createEventsSection(screen, true, (mutateNode) => updateNode(screen.id, mutateNode))];
 }
 
 /**
@@ -188,6 +189,7 @@ function createAreaProperties(area, record) {
   }
   if (!area.split) sections.push(createWidgetLayoutSection(area));
   sections.push(createNodeAppearanceSection(area, 'area'));
+  sections.push(createEventsSection(area, false, (mutateNode) => updateNode(area.id, mutateNode)));
   sections.push(createPanelSection('Notes', [createNotesField(area)], false));
   return sections;
 }
@@ -276,6 +278,21 @@ function createWidgetContentField(widget, fieldDefinition) {
       return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— aucune —' }, ...pageStackChoices],
         (pageStackId) => commitValue(pageStackId || undefined));
     }
+    case 'menuLinks': {
+      const menuChoices = [{ value: '', label: '— menu —' }, ...Object.entries(appState.uiDocument.menus ?? {}).map(([menuId, menu]) => ({ value: menuId, label: `${menuId} · ${menu.name}` }))];
+      const menuLinks = currentValue ?? [];
+      const linkRows = menuLinks.map((menuLink, linkIndex) => {
+        const updateLink = (changes) => commitValue(menuLinks.map((candidate, candidateIndex) => (candidateIndex === linkIndex ? { ...candidate, ...changes } : candidate)));
+        const labelInput = createElement('input', { attributes: { type: 'text' }, on: { change: () => updateLink({ label: labelInput.value }) } });
+        labelInput.value = menuLink.label ?? '';
+        return createElement('div', { className: 'list-row' }, [labelInput,
+          createSelectElement(menuLink.menuId ?? '', menuChoices, (menuId) => updateLink({ menuId })),
+          createElement('button', { className: 'is-danger', text: '✕', attributes: { type: 'button' },
+            on: { click: () => commitValue(menuLinks.filter((unusedLink, candidateIndex) => candidateIndex !== linkIndex)) } })]);
+      });
+      return createElement('div', {}, [createElement('div', { className: 'field-label', text: fieldDefinition.label }), ...linkRows,
+        createButtonRow([{ label: '+ Menu', onClick: () => commitValue([...menuLinks, { label: 'Menu', menuId: '' }]) }])]);
+    }
     case 'tableColumns': return createTextField(fieldDefinition.label,
       (currentValue ?? []).map((column) => `${column.label} | ${column.width ?? 'fill'}`).join('\n'),
       (linesText) => commitValue(linesText.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -355,12 +372,10 @@ function createWidgetProperties(widget, record) {
   sections.push(createPanelSection('État et action', [
     createCheckboxField('Actif', widget.state?.enabled !== false, (isEnabled) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.enabled = isEnabled; })),
     createCheckboxField('Visible', widget.state?.visible !== false, (isVisible) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.visible = isVisible; })),
-    createSelectField('Action', widget.action?.type ?? 'none', [{ value: 'none', label: 'Aucune' }, { value: 'navigate', label: 'Aller à un écran' }, { value: 'custom', label: 'Perso (décrite)' }],
-      (actionType) => updateNode(widget.id, (targetWidget) => { targetWidget.action = { type: actionType }; })),
-    widget.action?.type === 'navigate' ? createSelectField('Écran cible', widget.action.target ?? '', ['', ...appState.uiDocument.screens.map((screen) => ({ value: screen.id, label: `${screen.id} · ${screen.name}` }))],
-      (target) => updateNode(widget.id, (targetWidget) => { targetWidget.action.target = target; })) : null,
-    widget.action?.type === 'custom' ? createTextField('Description de l\'action', widget.action.description, (description) => updateNode(widget.id, (targetWidget) => { targetWidget.action.description = description; })) : null,
+    createElement('div', { className: 'field-label', text: 'Action du clic / tap' }),
+    createActionEditor(widget.action, (newAction) => updateNode(widget.id, (targetWidget) => { targetWidget.action = newAction; })),
   ], false));
+  sections.push(createEventsSection(widget, false, (mutateNode) => updateNode(widget.id, mutateNode)));
   if (widget.type !== 'componentInstance') sections.push(createNodeAppearanceSection(widget, widget.type));
   sections.push(createPanelSection('Notes', [createNotesField(widget)], false));
   return sections;
@@ -460,6 +475,15 @@ function createAppSettingsView() {
     createElement('div', { className: 'panel-hint', text: 'Gardés dans cet appareil. Astuce : glisse sur un libellé souligné pour changer la valeur.' }),
     ...settingDefinitions.map((settingDefinition) => createNumberField(settingDefinition.label, appSettings[settingDefinition.key],
       (newValue) => updateAppSetting(settingDefinition.key, newValue), { step: 1, min: settingDefinition.min, max: settingDefinition.max })),
+    createElement('div', { className: 'panel-hint', text: 'Mode test (▶ Tester) — pour essayer sur iPad une app faite pour la souris :' }),
+    createNumberField('Appui long (ms)', appSettings.longPressDuration, (newValue) => updateAppSetting('longPressDuration', newValue), { step: 10, min: 200, max: 2000 }),
+    createNumberField('Double tap : délai max (ms)', appSettings.doubleTapDelay, (newValue) => updateAppSetting('doubleTapDelay', newValue), { step: 10, min: 150, max: 800 }),
+    createCheckboxField('Simuler la souris avec le Pencil (aussi réglable dans la barre du test)', appSettings.simulateMouseWithPencil,
+      (isChecked) => updateAppSetting('simulateMouseWithPencil', isChecked)),
+    createSelectField('Pencil : double tap =', appSettings.pencilDoubleTapAs,
+      [{ value: 'rightClick', label: 'Clic droit' }, { value: 'doubleClick', label: 'Double clic' }], (newValue) => updateAppSetting('pencilDoubleTapAs', newValue)),
+    createSelectField('Pencil : appui long =', appSettings.pencilLongPressAs,
+      [{ value: 'rightClick', label: 'Clic droit' }, { value: 'none', label: 'Rien' }], (newValue) => updateAppSetting('pencilLongPressAs', newValue)),
     createButtonRow([{ label: 'Valeurs par défaut', onClick: () => {
       for (const settingKey of Object.keys(DEFAULT_APP_SETTINGS)) updateAppSetting(settingKey, DEFAULT_APP_SETTINGS[settingKey]);
     } }]),

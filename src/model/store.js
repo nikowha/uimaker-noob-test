@@ -11,6 +11,11 @@ export const DEFAULT_APP_SETTINGS = {
   resizeHandleSize: 14,      // côté des poignées de redimensionnement (px à l'écran)
   scrubPixelsPerStep: 6,     // px à parcourir pour changer une valeur d'un pas en glissant
   snapDistance: 10,          // distance d'aimantation des bords d'areas (px à l'écran)
+  longPressDuration: 500,    // mode test : durée d'un appui long (ms)
+  doubleTapDelay: 300,       // mode test : délai max entre deux taps pour un double tap (ms)
+  simulateMouseWithPencil: false,      // mode test : le Pencil imite la souris (pour tester une app de bureau sur iPad)
+  pencilDoubleTapAs: 'rightClick',     // … double tap du Pencil = clic droit ou double clic
+  pencilLongPressAs: 'rightClick',     // … appui long du Pencil = clic droit ou rien
 };
 
 export const appSettings = { ...DEFAULT_APP_SETTINGS };
@@ -20,7 +25,7 @@ function loadAppSettings() {
   try {
     const storedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
     for (const settingKey of Object.keys(DEFAULT_APP_SETTINGS)) {
-      if (typeof storedSettings[settingKey] === 'number') appSettings[settingKey] = storedSettings[settingKey];
+      if (typeof storedSettings[settingKey] === typeof DEFAULT_APP_SETTINGS[settingKey]) appSettings[settingKey] = storedSettings[settingKey];
     }
   } catch (error) {
     console.error('loadAppSettings', error);
@@ -30,10 +35,11 @@ function loadAppSettings() {
 /**
  * Change un réglage de l'application et l'enregistre.
  * @param {string} settingKey clé (DEFAULT_APP_SETTINGS)
- * @param {number|undefined} settingValue nouvelle valeur (undefined = valeur par défaut)
+ * @param {number|string|boolean|undefined} settingValue nouvelle valeur (undefined ou mauvais type = valeur par défaut)
  */
 export function updateAppSetting(settingKey, settingValue) {
-  appSettings[settingKey] = typeof settingValue === 'number' && !Number.isNaN(settingValue) ? settingValue : DEFAULT_APP_SETTINGS[settingKey];
+  const isValidValue = typeof settingValue === typeof DEFAULT_APP_SETTINGS[settingKey] && !Number.isNaN(settingValue);
+  appSettings[settingKey] = isValidValue ? settingValue : DEFAULT_APP_SETTINGS[settingKey];
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
   } catch (error) {

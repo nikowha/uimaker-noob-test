@@ -131,9 +131,9 @@ export const WIDGET_TYPES = {
   },
   menuBar: {
     label: 'Barre de menus', libraryIcon: 'menu',
-    defaults: { name: 'MenuBar', content: { menus: [{ label: 'File', items: [] }, { label: 'Edit', items: [] }, { label: 'View', items: [] }] }, size: { width: 'fill', height: 28 } },
+    defaults: { name: 'MenuBar', content: { menus: [{ label: 'File', menuId: '' }, { label: 'Edit', menuId: '' }, { label: 'View', menuId: '' }] }, size: { width: 'fill', height: 28 } },
     fields: [
-      { target: 'content', key: 'menus', label: 'Menus (un par ligne)', kind: 'itemLines' },
+      { target: 'content', key: 'menus', label: 'Menus de la barre (texte → menu de la section « Menus » à droite)', kind: 'menuLinks' },
     ],
   },
   toolbar: {

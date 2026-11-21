@@ -38,6 +38,7 @@ export async function buildUiSpecExport(uiDocument) {
   const iconReferences = new Set();
   collectIconReferences(exportedDocument.screens, iconReferences);
   collectIconReferences(exportedDocument.components, iconReferences);
+  collectIconReferences(exportedDocument.menus, iconReferences);
   exportedDocument.icons = {};
   for (const iconReference of [...iconReferences].sort()) {
     const iconEntry = getIconExportEntry(iconReference);
