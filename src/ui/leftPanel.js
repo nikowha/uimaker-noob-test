@@ -244,6 +244,9 @@ function createWidgetContentField(widget, fieldDefinition) {
     if (fieldDefinition.target === 'widget') { targetWidget[fieldDefinition.key] = newValue; return; }
     targetWidget[fieldDefinition.target] ??= {};
     targetWidget[fieldDefinition.target][fieldDefinition.key] = newValue;
+    if (targetWidget.type === 'separator' && fieldDefinition.key === 'orientation') {
+      targetWidget.size = newValue === 'vertical' ? { width: 1, height: 'fill' } : { width: 'fill', height: 1 };
+    }
   });
   switch (fieldDefinition.kind) {
     case 'textarea': return createTextField(fieldDefinition.label, currentValue, commitValue, { isMultiline: true });

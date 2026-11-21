@@ -7,6 +7,7 @@ import {
 
 const ICON_TARGET_TYPES = new Set(['button', 'icon']);
 const FREE_DROP_DEFAULT_SIZE = { width: 240, height: 160 };
+const DEFAULT_FREE_PLACEMENT = { anchor: 'topLeft', x: 24, y: 24 };
 
 /**
  * En mode libre, « remplir » étire le widget sur toute l'area. Quand on le dépose à un point précis,
@@ -73,6 +74,8 @@ export function placeLibraryItem(libraryItem, holderId, insertIndex, placement) 
   let createdWidgetId = null;
   commitChange((uiDocument) => {
     const createdWidget = createWidgetFromLibraryItem(uiDocument, libraryItem);
+    const holderNode = buildNodeIndex(uiDocument).get(holderId)?.node;
+    if (!placement && holderNode?.widgetLayout?.mode === 'free') placement = { ...DEFAULT_FREE_PLACEMENT };
     if (placement) { createdWidget.placement = placement; replaceFillSizeForFreeDrop(createdWidget); }
     if (insertWidget(uiDocument, holderId, createdWidget, insertIndex)) createdWidgetId = createdWidget.id;
   });

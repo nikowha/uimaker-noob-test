@@ -2,7 +2,7 @@
 import { createElement } from '../utils/dom.js';
 import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import { WIDGET_TYPES } from '../model/catalog.js';
-import { countStyleUsers, createId, insertWidget } from '../model/document.js';
+import { buildNodeIndex, countStyleUsers, createId, insertWidget } from '../model/document.js';
 import { buildTemplate, TEMPLATE_CATEGORIES } from '../model/templates.js';
 import { getIconSvg, isIconLibraryLoaded, loadIconLibrary, searchIcons } from '../render/iconLibrary.js';
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
@@ -14,6 +14,7 @@ const RIGHT_SECTIONS = [
   { value: 'styles', label: 'Styles partagés' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
+const FREE_TEMPLATE_WIDTH = 320;
 
 let panelBodyElement = null;
 let sectionSelectHost = null;
@@ -73,7 +74,15 @@ function applyTemplate(categoryKey, templateKey) {
   commitChange((uiDocument) => {
     const { createdNode } = buildTemplate(uiDocument, categoryKey, templateKey);
     if (categoryKey === 'screen') { uiDocument.screens.push(createdNode); nodeToSelect = createdNode.id; appState.currentScreenId = createdNode.id; }
-    else if (categoryKey === 'widgets') { insertWidget(uiDocument, holderId, createdNode); nodeToSelect = createdNode.id; }
+    else if (categoryKey === 'widgets') {
+      const holderNode = buildNodeIndex(uiDocument).get(holderId)?.node;
+      if (holderNode?.widgetLayout?.mode === 'free') {
+        createdNode.placement = { anchor: 'topLeft', x: 24, y: 24 };
+        if (createdNode.size?.width === 'fill') createdNode.size.width = FREE_TEMPLATE_WIDTH;
+      }
+      insertWidget(uiDocument, holderId, createdNode);
+      nodeToSelect = createdNode.id;
+    }
     else { appState.currentThemeId = createdNode; }
   });
   if (nodeToSelect) selectNode(nodeToSelect);

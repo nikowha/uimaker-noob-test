@@ -5,6 +5,8 @@ import { appSettings, appState, notifyChange, setHistoryGroup } from '../model/s
 
 const SCRUB_START_THRESHOLD_PIXELS = 3;
 let scrubGestureCounter = 0;
+/** Sections ouvertes / fermées par l'utilisateur, gardées quand les panneaux se redessinent (clé = titre). */
+const sectionOpenStateByTitle = new Map();
 
 /**
  * Permet de changer une valeur numérique en glissant verticalement sur son libellé (Pencil, souris, doigt) :
@@ -206,8 +208,11 @@ export function createSizeField(label, value, onCommit) {
  * @returns {HTMLElement} section
  */
 export function createPanelSection(title, children, isOpen = true) {
-  return createElement('details', { className: 'panel-section', attributes: { open: isOpen } },
+  const isRememberedOpen = sectionOpenStateByTitle.get(title) ?? isOpen;
+  const sectionElement = createElement('details', { className: 'panel-section', attributes: { open: isRememberedOpen } },
     [createElement('summary', { text: title }), ...children]);
+  sectionElement.addEventListener('toggle', () => sectionOpenStateByTitle.set(title, sectionElement.open));
+  return sectionElement;
 }
 
 /**

@@ -63,7 +63,7 @@ export function createLeafArea(uiDocument, name = 'Area') {
   return {
     id: createId(uiDocument, 'A'), name,
     sizing: { mode: 'fill' },
-    widgetLayout: { mode: 'stack', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' },
+    widgetLayout: { mode: 'free', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' },
     widgets: [],
   };
 }
@@ -252,7 +252,7 @@ export function deleteArea(uiDocument, areaId) {
 export function ensureLeafArea(area) {
   if (!area.split) {
     area.widgets ??= [];
-    area.widgetLayout ??= { mode: 'stack', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' };
+    area.widgetLayout ??= { mode: 'free', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' };
   }
 }
 
