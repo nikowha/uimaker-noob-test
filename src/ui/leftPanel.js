@@ -2,7 +2,7 @@
 import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
-import { buildNodeIndex, computeNodePath, countStyleUsers, createId, detachComponentInstance, saveWidgetAsComponent } from '../model/document.js';
+import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createPage, detachComponentInstance, saveWidgetAsComponent } from '../model/document.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
   createButtonRow, createCheckboxField, createColorField, createInfoRow, createNumberField, createPanelSection,
@@ -265,6 +265,17 @@ function createWidgetContentField(widget, fieldDefinition) {
         const [itemLabel, itemIcon = ''] = line.split('|').map((part) => part.trim());
         return { ...(currentValue?.[lineIndex] ?? {}), label: itemLabel, icon: itemIcon };
       })), { isMultiline: true, placeholder: 'Texte | lucide:icone' });
+    case 'pageSelect': return createSelectField(fieldDefinition.label, String(currentValue ?? 0),
+      (widget.children ?? []).map((pageWidget, pageIndex) => ({ value: String(pageIndex), label: `${pageIndex} · ${pageWidget.name} (${pageWidget.id})` })),
+      (pageIndexText) => commitValue(Number(pageIndexText)));
+    case 'pageStackRef': {
+      const widgetScreen = buildNodeIndex(appState.uiDocument).get(widget.id)?.screen;
+      const pageStackChoices = [...buildNodeIndex(appState.uiDocument).values()]
+        .filter((record) => record.kind === 'widget' && record.node.type === 'pageStack' && record.screen === widgetScreen)
+        .map((record) => ({ value: record.node.id, label: `${record.node.name} (${record.node.id})` }));
+      return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— aucune —' }, ...pageStackChoices],
+        (pageStackId) => commitValue(pageStackId || undefined));
+    }
     case 'tableColumns': return createTextField(fieldDefinition.label,
       (currentValue ?? []).map((column) => `${column.label} | ${column.width ?? 'fill'}`).join('\n'),
       (linesText) => commitValue(linesText.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -334,7 +345,13 @@ function createWidgetProperties(widget, record) {
     );
   }
   sections.push(createPanelSection('Taille et placement', sizeAndPlacementFields));
-  if (widget.children) sections.push(createWidgetLayoutSection(widget));
+  if (widget.type === 'pageStack') {
+    sections.push(createPanelSection('Pages', [
+      createElement('div', { className: 'panel-hint', text: 'Une seule page visible à la fois. Une liste ou des onglets peuvent la piloter (champ « Pilote la pile de pages »). Choisis la page affichée dans « Contenu » pour la modifier.' }),
+      createButtonRow([{ label: '+ Page', onClick: () => addPageToStack(widget.id) }]),
+    ]));
+  }
+  if (widget.children && widget.type !== 'pageStack') sections.push(createWidgetLayoutSection(widget));
   sections.push(createPanelSection('État et action', [
     createCheckboxField('Actif', widget.state?.enabled !== false, (isEnabled) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.enabled = isEnabled; })),
     createCheckboxField('Visible', widget.state?.visible !== false, (isVisible) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.visible = isVisible; })),
@@ -347,6 +364,18 @@ function createWidgetProperties(widget, record) {
   if (widget.type !== 'componentInstance') sections.push(createNodeAppearanceSection(widget, widget.type));
   sections.push(createPanelSection('Notes', [createNotesField(widget)], false));
   return sections;
+}
+
+/**
+ * Ajoute une page à une pile de pages et l'affiche.
+ * @param {string} pageStackId pile de pages
+ */
+function addPageToStack(pageStackId) {
+  commitChange((uiDocument) => {
+    const pageStack = buildNodeIndex(uiDocument).get(pageStackId).node;
+    pageStack.children.push(createPage(uiDocument, `Page${pageStack.children.length + 1}`));
+    pageStack.content = { ...pageStack.content, activeIndex: pageStack.children.length - 1 };
+  });
 }
 
 /**

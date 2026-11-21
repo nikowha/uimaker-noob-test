@@ -198,7 +198,8 @@ function handleTestPointerDown(pointerEvent) {
 }
 
 /**
- * Sélectionne un élément d'une liste / d'onglets / d'un tableau.
+ * Sélectionne un élément d'une liste / d'onglets / d'un tableau ; si la liste ou les onglets pilotent
+ * une pile de pages, affiche la page de même index.
  * @param {object} widget widget
  * @param {string} contentKey clé de l'index dans content
  * @param {number} itemIndex index touché
@@ -206,6 +207,9 @@ function handleTestPointerDown(pointerEvent) {
 function selectItem(widget, contentKey, itemIndex) {
   if (itemIndex < 0) return;
   widget.content[contentKey] = itemIndex;
+  const controlledPageStack = widget.content.controlsPageStack
+    ? buildNodeIndex(testSession.testDocument).get(widget.content.controlsPageStack)?.node : null;
+  if (controlledPageStack?.type === 'pageStack') controlledPageStack.content = { ...controlledPageStack.content, activeIndex: itemIndex };
   renderTestScreen({ keepScale: true });
 }
 

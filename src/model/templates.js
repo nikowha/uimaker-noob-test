@@ -1,7 +1,7 @@
 // Modèles pour essayer vite : écrans types, groupes de widgets, thèmes (PROTOTYPE).
 // Chaque modèle fabrique ses éléments avec de nouveaux ID (aucun ID partagé avec le projet).
 import { WIDGET_TYPES } from './catalog.js';
-import { createId, createLeafArea, createScreen, createWidget } from './document.js';
+import { createId, createLeafArea, createPage, createScreen, createWidget } from './document.js';
 
 /**
  * Crée un widget du catalogue et fusionne des valeurs (content et state fusionnés, le reste remplacé).
@@ -109,6 +109,70 @@ const WIDGET_GROUP_TEMPLATES = {
     ] }) },
 };
 
+/**
+ * Crée une page (conteneur qui remplit sa pile de pages) avec ses widgets.
+ * @param {object} uiDocument document
+ * @param {string} pageName nom anglais
+ * @param {object[]} pageWidgets widgets de la page
+ * @returns {object} page
+ */
+function buildPage(uiDocument, pageName, pageWidgets) {
+  const page = createPage(uiDocument, pageName);
+  page.widgetLayout = { mode: 'stack', direction: 'vertical', gap: 12, padding: [0, 0, 0, 0], alignMain: 'start', alignCross: 'stretch' };
+  page.children = pageWidgets;
+  return page;
+}
+
+/**
+ * Fenêtre de réglages : la liste de gauche (General / Display / Audio) pilote une pile de 3 pages à droite.
+ * Montre le lien « liste → pile de pages » (content.controlsPageStack).
+ * @param {object} uiDocument document
+ * @returns {object} écran
+ */
+function buildSettingsWindow(uiDocument) {
+  const createTitle = (titleName, titleText) => buildWidget(uiDocument, 'text', { name: titleName, content: { text: titleText, textRole: 'title' } });
+  const settingsPages = buildWidget(uiDocument, 'pageStack', { name: 'SettingsPages', content: { activeIndex: 0 } });
+  settingsPages.children = [
+    buildPage(uiDocument, 'GeneralPage', [
+      createTitle('GeneralTitle', 'General'),
+      buildWidget(uiDocument, 'toggle', { name: 'AutoSaveToggle', content: { label: 'Auto save' } }),
+      buildWidget(uiDocument, 'toggle', { name: 'CheckUpdatesToggle', content: { label: 'Check for updates' }, state: { on: false } }),
+      buildWidget(uiDocument, 'dropdown', { name: 'LanguageDropdown', content: { options: ['English', 'Français', 'Deutsch'] } }),
+    ]),
+    buildPage(uiDocument, 'DisplayPage', [
+      createTitle('DisplayTitle', 'Display'),
+      buildWidget(uiDocument, 'dropdown', { name: 'ResolutionDropdown', content: { options: ['1920 × 1080', '2560 × 1440', '3840 × 2160'] } }),
+      buildWidget(uiDocument, 'text', { name: 'BrightnessLabel', content: { text: 'Brightness', textRole: 'caption' } }),
+      buildWidget(uiDocument, 'slider', { name: 'BrightnessSlider', content: { value: 80 } }),
+      buildWidget(uiDocument, 'toggle', { name: 'FullscreenToggle', content: { label: 'Full screen' }, state: { on: false } }),
+      buildWidget(uiDocument, 'checkbox', { name: 'VsyncCheckbox', content: { label: 'Vertical sync' } }),
+    ]),
+    buildPage(uiDocument, 'AudioPage', [
+      createTitle('AudioTitle', 'Audio'),
+      buildWidget(uiDocument, 'text', { name: 'VolumeLabel', content: { text: 'Master volume', textRole: 'caption' } }),
+      buildWidget(uiDocument, 'slider', { name: 'VolumeSlider', content: { value: 65 } }),
+      buildWidget(uiDocument, 'dropdown', { name: 'OutputDropdown', content: { options: ['Speakers', 'Headphones', 'HDMI'] } }),
+      buildWidget(uiDocument, 'toggle', { name: 'MuteToggle', content: { label: 'Mute' }, state: { on: false } }),
+    ]),
+  ];
+  const categoryList = buildWidget(uiDocument, 'list', { name: 'SettingsCategories', size: { width: 'fill', height: 'fill' },
+    content: { items: [{ label: 'General', icon: 'lucide:settings' }, { label: 'Display', icon: 'lucide:monitor' }, { label: 'Audio', icon: 'lucide:volume-2' }],
+      selectedIndex: 0, controlsPageStack: settingsPages.id },
+    notes: 'Choisir une catégorie affiche la page de même index dans SettingsPages.' });
+  return buildScreen(uiDocument, 'custom', 'SettingsWindow',
+    () => buildSplitArea(uiDocument, 'Root', 'horizontal', null, [
+      buildLeafArea(uiDocument, 'SettingsSidebar', { mode: 'fixed', size: 200 }, VERTICAL_STACK, [categoryList], { styleOverrides: PANEL_LOOK }),
+      buildLeafArea(uiDocument, 'SettingsContent', { mode: 'fill' }, { ...VERTICAL_STACK, gap: 16, padding: [20, 20, 20, 20] }, [
+        settingsPages,
+        buildWidget(uiDocument, 'container', { name: 'DialogButtons', size: { width: 'fill', height: 'hug' },
+          widgetLayout: { mode: 'stack', direction: 'horizontal', gap: 8, padding: [0, 0, 0, 0], alignMain: 'end', alignCross: 'center' },
+          styleOverrides: { borderWidth: 0 },
+          children: [buildWidget(uiDocument, 'button', { name: 'CancelButton', content: { label: 'Cancel' }, styleOverrides: { background: '#3A3D45' } }),
+            buildWidget(uiDocument, 'button', { name: 'SaveButton', content: { label: 'Save' } })] }),
+      ]),
+    ]), { platform: 'macos', size: { width: 900, height: 600 } });
+}
+
 /** Écrans types (ajoutés au projet). */
 const SCREEN_TEMPLATES = {
   desktopApp: { label: 'App de bureau (menus, outils, 3 panneaux, barre d\'état)', icon: 'app-window', build: (uiDocument) => buildScreen(uiDocument, '16:9-small', 'DesktopMainWindow',
@@ -138,22 +202,7 @@ const SCREEN_TEMPLATES = {
       buildLeafArea(uiDocument, 'StatusBarArea', { mode: 'fixed', size: 24 }, { ...HORIZONTAL_BAR, padding: [0, 8, 0, 8] },
         [buildWidget(uiDocument, 'text', { name: 'StatusText', content: { text: 'Ready', textRole: 'caption' } })]),
     ])) },
-  settingsWindow: { label: 'Fenêtre de réglages (barre latérale + formulaire)', icon: 'settings-2', build: (uiDocument) => buildScreen(uiDocument, 'custom', 'SettingsWindow',
-    () => buildSplitArea(uiDocument, 'Root', 'horizontal', null, [
-      buildLeafArea(uiDocument, 'SettingsSidebar', { mode: 'fixed', size: 200 }, VERTICAL_STACK, [
-        buildWidget(uiDocument, 'list', { name: 'SettingsCategories', size: { width: 'fill', height: 'fill' },
-          content: { items: [{ label: 'General', icon: 'lucide:settings' }, { label: 'Display', icon: 'lucide:monitor' }, { label: 'Audio', icon: 'lucide:volume-2' }] } }),
-      ], { styleOverrides: PANEL_LOOK }),
-      buildLeafArea(uiDocument, 'SettingsContent', { mode: 'fill' }, { ...VERTICAL_STACK, padding: [20, 20, 20, 20] }, [
-        buildWidget(uiDocument, 'text', { name: 'SettingsTitle', content: { text: 'General', textRole: 'title' } }),
-        WIDGET_GROUP_TEMPLATES.settingsGroup.build(uiDocument),
-        buildWidget(uiDocument, 'container', { name: 'DialogButtons', size: { width: 'fill', height: 'hug' },
-          widgetLayout: { mode: 'stack', direction: 'horizontal', gap: 8, padding: [0, 0, 0, 0], alignMain: 'end', alignCross: 'center' },
-          styleOverrides: { borderWidth: 0 },
-          children: [buildWidget(uiDocument, 'button', { name: 'CancelButton', content: { label: 'Cancel' }, styleOverrides: { background: '#3A3D45' } }),
-            buildWidget(uiDocument, 'button', { name: 'SaveButton', content: { label: 'Save' } })] }),
-      ]),
-    ]), { platform: 'macos', size: { width: 900, height: 600 } }) },
+  settingsWindow: { label: 'Fenêtre de réglages (la liste change la page de droite)', icon: 'settings-2', build: buildSettingsWindow },
   ipadSplit: { label: 'iPad : liste + détail', icon: 'tablet', build: (uiDocument) => buildScreen(uiDocument, 'ipad', 'IpadMainScreen',
     () => buildSplitArea(uiDocument, 'Root', 'horizontal', null, [
       buildLeafArea(uiDocument, 'ListColumn', { mode: 'fixed', size: 320 }, { ...VERTICAL_STACK, padding: [24, 16, 16, 16] }, [

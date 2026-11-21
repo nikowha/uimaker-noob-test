@@ -94,6 +94,7 @@ export const WIDGET_TYPES = {
     fields: [
       { target: 'content', key: 'items', label: 'Éléments (un par ligne)', kind: 'itemLines' },
       { target: 'content', key: 'selectedIndex', label: 'Sélection (index, -1 = aucune)', kind: 'number' },
+      { target: 'content', key: 'controlsPageStack', label: 'Pilote la pile de pages', kind: 'pageStackRef' },
     ],
   },
   table: {
@@ -125,6 +126,7 @@ export const WIDGET_TYPES = {
     fields: [
       { target: 'content', key: 'tabs', label: 'Onglets (un par ligne)', kind: 'itemLines' },
       { target: 'content', key: 'selectedIndex', label: 'Onglet actif (index)', kind: 'number' },
+      { target: 'content', key: 'controlsPageStack', label: 'Pilote la pile de pages', kind: 'pageStackRef' },
     ],
   },
   menuBar: {
@@ -153,6 +155,14 @@ export const WIDGET_TYPES = {
       widgetLayout: { mode: 'stack', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' } },
     fields: [
       { target: 'content', key: 'title', label: 'Titre (facultatif)', kind: 'text' },
+    ],
+  },
+  pageStack: {
+    label: 'Pile de pages', libraryIcon: 'layers', isContainer: true,
+    defaults: { name: 'PageStack', content: { activeIndex: 0 }, size: { width: 'fill', height: 'fill' },
+      widgetLayout: { mode: 'stack', direction: 'vertical', gap: 0, padding: [0, 0, 0, 0], alignMain: 'start', alignCross: 'stretch' } },
+    fields: [
+      { target: 'content', key: 'activeIndex', label: 'Page affichée', kind: 'pageSelect' },
     ],
   },
   placeholder: {

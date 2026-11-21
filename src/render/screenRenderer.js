@@ -203,9 +203,13 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       widgetElement.classList.add('ui-widget-container', `uiw-${renderedWidget.type}`);
       applyWidgetLayout(widgetElement, renderedWidget.widgetLayout);
       if (renderedWidget.content?.title) widgetElement.append(createElement('div', { className: 'uiw-container-title', text: renderedWidget.content.title }));
-      for (const childWidget of renderedWidget.children) {
-        widgetElement.append(renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance));
-      }
+      const isPageStack = renderedWidget.type === 'pageStack';
+      const activePageIndex = Math.max(0, Math.min(renderedWidget.content?.activeIndex ?? 0, renderedWidget.children.length - 1));
+      renderedWidget.children.forEach((childWidget, childIndex) => {
+        const childElement = renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance);
+        if (isPageStack && childIndex !== activePageIndex) childElement.style.display = 'none';
+        widgetElement.append(childElement);
+      });
     } else {
       fillWidgetContent(widgetElement, renderedWidget);
     }

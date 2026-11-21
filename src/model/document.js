@@ -98,8 +98,21 @@ export function createWidget(uiDocument, widgetType) {
   const typeDefinition = WIDGET_TYPES[widgetType];
   const widget = { id: createId(uiDocument, 'W'), type: widgetType, ...cloneJson(typeDefinition.defaults) };
   if (typeDefinition.isContainer) widget.children = [];
+  if (widgetType === 'pageStack') widget.children = [createPage(uiDocument, 'Page1'), createPage(uiDocument, 'Page2')];
   widget.notes = '';
   return widget;
+}
+
+/**
+ * Crée une page (conteneur qui remplit sa pile de pages).
+ * @param {object} uiDocument document
+ * @param {string} pageName nom anglais de la page
+ * @returns {object} conteneur
+ */
+export function createPage(uiDocument, pageName) {
+  const page = createWidget(uiDocument, 'container');
+  Object.assign(page, { name: pageName, size: { width: 'fill', height: 'fill' }, styleOverrides: { borderWidth: 0 } });
+  return page;
 }
 
 /**
