@@ -7,6 +7,7 @@ import { buildUiSpecExport, parseUiSpecImport } from '../io/uispecExport.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import { createSelectElement } from './fields.js';
 import { fitScreenInView, zoomFromButton } from './canvasView.js';
+import { openTestMode } from './testMode.js';
 
 const ZOOM_STEP = 1.25;
 
@@ -99,6 +100,7 @@ export function renderTopBar() {
     createToolbarButton(appState.areIdsVisible ? 'tag' : 'tag', appState.areIdsVisible ? 'Masquer les ID' : 'Afficher les ID',
       () => { appState.areIdsVisible = !appState.areIdsVisible; notifyChange(); }, appState.areIdsVisible ? 'ID' : 'ID off'),
     createElement('span', { className: 'top-spacer' }),
+    createToolbarButton('play', 'Tester l\'UI (plein écran, manipulable, sans modifier le projet)', openTestMode, 'Tester'),
     createToolbarButton('file-plus', 'Nouveau projet', startNewProject),
     createToolbarButton('file-down', 'Importer un ui.json', importUiSpec, 'Importer'),
     createToolbarButton('file-up', 'Exporter ui.json (spec UI pour une autre session)', exportUiSpec, 'Exporter'),

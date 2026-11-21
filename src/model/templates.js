@@ -88,9 +88,9 @@ const WIDGET_GROUP_TEMPLATES = {
   }) },
   dataTable: { label: 'Tableau', icon: 'table', build: (uiDocument) => buildWidget(uiDocument, 'table', {
     name: 'AssetTable', size: { width: 'fill', height: 200 },
-    content: { columns: [{ label: 'Name', width: 'fill' }, { label: 'Type', width: 90 }, { label: 'Size', width: 70 }, { label: 'Date', width: 100 }],
-      rows: [['Robot.glb', 'Mesh', '12 MB', '2026-11-02'], ['Key light', 'Light', '1 KB', '2026-11-05'], ['Main camera', 'Camera', '2 KB', '2026-11-06'],
-        ['Floor', 'Mesh', '300 KB', '2026-11-10'], ['Skybox.hdr', 'Image', '24 MB', '2026-11-12']] } }) },
+    content: { columns: [{ label: 'Name', width: 'fill' }, { label: 'Type', width: 64 }, { label: 'Size', width: 60 }],
+      rows: [['Robot.glb', 'Mesh', '12 MB'], ['Key light', 'Light', '1 KB'], ['Main camera', 'Camera', '2 KB'],
+        ['Floor', 'Mesh', '300 KB'], ['Skybox.hdr', 'Image', '24 MB']] } }) },
   infoCard: { label: 'Carte', icon: 'square-user', build: (uiDocument) => buildWidget(uiDocument, 'container', {
     name: 'InfoCard', size: { width: 'fill', height: 'hug' },
     children: [
