@@ -331,6 +331,7 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .test-dialog-backdrop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0009; }
 .test-dialog-backdrop > .test-frame { box-shadow: 0 20px 60px #000c; }
 .test-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; padding: 0 6px; border: 1px solid var(--editor-border); border-radius: 6px; min-height: var(--touch-target); }
+.test-toolbar { flex-wrap: wrap; overflow-x: visible; }
 .test-toolbar > * { flex: none; }
 .test-toolbar button { white-space: nowrap; }
 .test-toolbar select { max-width: 190px; }
