@@ -1,6 +1,6 @@
 // Fenêtre de droite : bibliothèque de widgets, icônes, styles partagés, thèmes (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
-import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
+import { appState, commitChange, notifyChange, selectNode, showScreen } from '../model/store.js';
 import { WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, countStyleUsers, createId, insertWidget } from '../model/document.js';
 import { buildTemplate, TEMPLATE_CATEGORIES } from '../model/templates.js';
@@ -62,7 +62,7 @@ function applyTemplate(categoryKey, templateKey) {
       const createdScreens = Array.isArray(createdNode) ? createdNode : [createdNode];
       uiDocument.screens.push(...createdScreens);
       nodeToSelect = createdScreens[0].id;
-      appState.currentScreenId = createdScreens[0].id;
+      showScreen(createdScreens[0].id);
     }
     else if (categoryKey === 'widgets') {
       const holderNode = buildNodeIndex(uiDocument).get(holderId)?.node;

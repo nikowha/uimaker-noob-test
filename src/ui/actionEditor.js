@@ -14,7 +14,9 @@ function listTargetChoices(targetKind) {
   const { uiDocument } = appState;
   if (targetKind === 'screen') return uiDocument.screens.map((screen) => ({ value: screen.id, label: `${screen.id} · ${screen.name}` }));
   if (targetKind === 'menu') return Object.entries(uiDocument.menus ?? {}).map(([menuId, menu]) => ({ value: menuId, label: `${menuId} · ${menu.name}` }));
-  const widgetRecords = [...buildNodeIndex(uiDocument).values()].filter((record) => record.kind === 'widget'
+  const { editedModuleId } = appState;
+  const isInScope = (record) => (editedModuleId ? record.screen.id === editedModuleId : !uiDocument.modules[record.screen.id]);
+  const widgetRecords = [...buildNodeIndex(uiDocument).values()].filter((record) => record.kind === 'widget' && isInScope(record)
     && (targetKind !== 'pageStack' || record.node.type === 'pageStack'));
   return widgetRecords.map((record) => ({ value: record.node.id, label: `${record.node.id} · ${record.node.name}` }));
 }
@@ -32,7 +34,10 @@ export function createActionEditor(action, onChange) {
   const controls = [createSelectElement(currentAction.type, ACTION_TYPES, (actionType) => onChange({ type: actionType }))];
   if (actionDefinition.targetKind) {
     const targetKey = actionDefinition.targetKind === 'menu' ? 'menuId' : 'target';
-    controls.push(createSelectElement(currentAction[targetKey] ?? '', [{ value: '', label: '— cible —' }, ...listTargetChoices(actionDefinition.targetKind)],
+    const targetChoices = listTargetChoices(actionDefinition.targetKind);
+    const currentTarget = currentAction[targetKey] ?? '';
+    if (currentTarget && !targetChoices.some((choice) => choice.value === currentTarget)) targetChoices.push({ value: currentTarget, label: currentTarget });
+    controls.push(createSelectElement(currentTarget, [{ value: '', label: '— cible —' }, ...targetChoices],
       (targetId) => commitAction({ [targetKey]: targetId })));
   }
   if (currentAction.type === 'showPage') {

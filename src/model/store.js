@@ -64,6 +64,8 @@ export const appState = {
   uiDocument: null,
   selectedId: null,          // ID d'un écran, area, widget, ou style (T…)
   currentScreenId: null,
+  editedModuleId: null,      // module en cours d'édition sur le canevas (null = on édite l'écran courant)
+  parentModuleIds: [],       // modules d'où l'on vient (édition d'un module dans un module)
   currentThemeId: null,
   armedLibraryItem: null,    // { kind: 'widget'|'module'|'libraryModule'|'icon', value } en attente d'un tap sur le canevas
   isScrubbing: false,        // vrai pendant qu'on change une valeur en glissant (la fenêtre de gauche ne se redessine pas)
@@ -103,23 +105,28 @@ function saveDocumentLocally() {
 function repairViewState() {
   const { uiDocument } = appState;
   if (!uiDocument.screens.some((screen) => screen.id === appState.currentScreenId)) appState.currentScreenId = uiDocument.screens[0]?.id ?? null;
+  if (appState.editedModuleId && !uiDocument.modules[appState.editedModuleId]) { appState.editedModuleId = null; appState.parentModuleIds = []; }
   if (!uiDocument.themes[appState.currentThemeId]) appState.currentThemeId = uiDocument.project.defaultTheme ?? Object.keys(uiDocument.themes)[0];
 }
 
 /**
  * Applique une modification du document avec historique, sauvegarde et redessin.
  * @param {(uiDocument: object) => void} mutateDocument fonction qui modifie le document
+ * @returns {boolean} faux si la modification a échoué (document inchangé)
  */
 export function commitChange(mutateDocument) {
   const previousSnapshot = JSON.stringify(appState.uiDocument);
   try {
+    const editedRootBefore = JSON.stringify(appState.uiDocument.modules[appState.editedModuleId]?.root);
     mutateDocument(appState.uiDocument);
+    const editedModule = appState.uiDocument.modules[appState.editedModuleId];
+    if (editedModule && JSON.stringify(editedModule.root) !== editedRootBefore) editedModule.hasLocalChanges = true;
   } catch (error) {
     console.error('commitChange', error);
     appState.uiDocument = JSON.parse(previousSnapshot);
-    return;
+    return false;
   }
-  if (JSON.stringify(appState.uiDocument) === previousSnapshot) { notifyChange(); return; }
+  if (JSON.stringify(appState.uiDocument) === previousSnapshot) { notifyChange(); return true; }
   const isSameGroup = activeHistoryGroup !== null && activeHistoryGroup === lastHistoryGroup;
   if (!isSameGroup) undoStack.push(previousSnapshot);
   lastHistoryGroup = activeHistoryGroup;
@@ -128,6 +135,7 @@ export function commitChange(mutateDocument) {
   repairViewState();
   saveDocumentLocally();
   notifyChange();
+  return true;
 }
 
 /**
@@ -158,6 +166,8 @@ export function replaceDocument(newDocument) {
     Object.assign(uiDocument, newDocument);
   });
   appState.selectedId = null;
+  appState.editedModuleId = null;
+  appState.parentModuleIds = [];
   appState.currentScreenId = newDocument.screens[0]?.id ?? null;
   appState.currentThemeId = newDocument.project.defaultTheme;
   notifyChange();
@@ -176,6 +186,16 @@ export function loadInitialDocument() {
   appState.uiDocument = storedDocument ?? createEmptyDocument();
   appState.currentScreenId = appState.uiDocument.screens[0].id;
   appState.currentThemeId = appState.uiDocument.project.defaultTheme;
+}
+
+/**
+ * Affiche un écran (quitte l'édition d'un module).
+ * @param {string} screenId écran
+ */
+export function showScreen(screenId) {
+  appState.currentScreenId = screenId;
+  appState.editedModuleId = null;
+  appState.parentModuleIds = [];
 }
 
 /**

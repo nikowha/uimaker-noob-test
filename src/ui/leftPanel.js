@@ -2,7 +2,9 @@
 import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
-import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createPage } from '../model/document.js';
+import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
+import { countModuleInstances, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
+import { getLibraryEntry } from '../io/moduleLibrary.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
   createButtonRow, createCheckboxField, createColorField, createInfoRow, createNumberField, createPanelSection,
@@ -10,7 +12,8 @@ import {
 } from './fields.js';
 import { createActionEditor, createEventsSection } from './actionEditor.js';
 import {
-  copySelectedAppearance, deleteSelection, detachInstance, duplicateSelection, pasteAppearanceOnSelection, saveAsModule, splitSelectedArea, updateNode,
+  copySelectedAppearance, deleteSelection, detachInstance, duplicateSelection, openModuleEditor, pasteAppearanceOnSelection, publishModule, saveAsModule,
+  splitSelectedArea, updateInstanceNode, updateModuleFromLibrary, updateNode,
 } from './editorActions.js';
 
 const LEFT_SECTIONS = [{ value: 'properties', label: 'Paramètres' }, { value: 'tree', label: 'Arbre' }, { value: 'settings', label: 'Réglages de l\x27app' }];
@@ -20,6 +23,8 @@ const ALIGN_CHOICES = ['start', 'center', 'end', 'stretch', 'spaceBetween'];
 
 let panelBodyElement = null;
 let sectionSelectHost = null;
+/** Élément interne choisi pour chaque instance (clé = ID de l'instance). */
+const innerNodeKeyByInstance = new Map();
 
 /**
  * Champs d'apparence (style ou valeurs propres d'un élément).
@@ -175,6 +180,7 @@ function createAreaProperties(area, record) {
       record.parent ? { label: 'Supprimer', isDanger: true, onClick: deleteSelection } : null,
     ].filter(Boolean)),
     area.moduleId ? createInfoRow('Module', `${area.moduleId} · ${appState.uiDocument.modules[area.moduleId]?.name ?? 'introuvable'}`) : null,
+    area.moduleId ? createModuleButtonRow(area.moduleId) : null,
     createButtonRow([area.moduleId
       ? { label: 'Détacher', title: 'Remplace l\'instance par une copie modifiable', onClick: () => detachInstance(area.id) }
       : { label: '→ Module', title: 'Enregistre cette area et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(area.id) }]),
@@ -191,6 +197,7 @@ function createAreaProperties(area, record) {
         (isResizable) => updateNode(area.id, (targetArea) => { targetArea.resizableSplitter = isResizable; })),
     ]));
   }
+  if (area.moduleId) sections.push(createInstanceSettingsSection(area));
   if (!area.split && !area.moduleId) sections.push(createWidgetLayoutSection(area));
   if (!area.moduleId) sections.push(createNodeAppearanceSection(area, 'area'));
   sections.push(createEventsSection(area, false, (mutateNode) => updateNode(area.id, mutateNode)));
@@ -241,12 +248,13 @@ function createWidgetLayoutSection(holderNode) {
  * Champ de contenu d'un widget selon sa définition dans le catalogue.
  * @param {object} widget widget
  * @param {object} fieldDefinition { target, key, label, kind, options }
+ * @param {(mutateNode: (node: object) => void) => void} [updateWidget] applique une modification (au widget par défaut)
  * @returns {HTMLElement} champ
  */
-function createWidgetContentField(widget, fieldDefinition) {
+function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutateNode) => updateNode(widget.id, mutateNode)) {
   const targetObject = fieldDefinition.target === 'widget' ? widget : widget[fieldDefinition.target] ?? {};
   const currentValue = targetObject[fieldDefinition.key];
-  const commitValue = (newValue) => updateNode(widget.id, (targetWidget) => {
+  const commitValue = (newValue) => updateWidget((targetWidget) => {
     if (fieldDefinition.target === 'widget') { targetWidget[fieldDefinition.key] = newValue; return; }
     targetWidget[fieldDefinition.target] ??= {};
     targetWidget[fieldDefinition.target][fieldDefinition.key] = newValue;
@@ -277,7 +285,7 @@ function createWidgetContentField(widget, fieldDefinition) {
     case 'pageStackRef': {
       const widgetScreen = buildNodeIndex(appState.uiDocument).get(widget.id)?.screen;
       const pageStackChoices = [...buildNodeIndex(appState.uiDocument).values()]
-        .filter((record) => record.kind === 'widget' && record.node.type === 'pageStack' && record.screen === widgetScreen)
+        .filter((record) => record.kind === 'widget' && record.node.type === 'pageStack' && record.screen.id === widgetScreen?.id)
         .map((record) => ({ value: record.node.id, label: `${record.node.name} (${record.node.id})` }));
       return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— aucune —' }, ...pageStackChoices],
         (pageStackId) => commitValue(pageStackId || undefined));
@@ -327,6 +335,7 @@ function createWidgetContentField(widget, fieldDefinition) {
  */
 function createWidgetProperties(widget, record) {
   const typeDefinition = WIDGET_TYPES[widget.type];
+  const isModuleRoot = !record.siblings;
   const parentLayout = record.parent.widgetLayout ?? { mode: 'stack' };
   const updateSize = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.size ??= {}; setOrDeleteValue(targetWidget.size, key, value); });
   const updatePlacement = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.placement ??= { anchor: 'topLeft', x: 0, y: 0 }; setOrDeleteValue(targetWidget.placement, key, value); });
@@ -335,14 +344,16 @@ function createWidgetProperties(widget, record) {
     : typeDefinition?.label ?? widget.type;
   const sections = [createPanelSection(typeLabel, [
     ...createIdentityFields(widget),
-    createButtonRow([
+    widget.type === 'moduleInstance' ? createModuleButtonRow(widget.moduleId) : null,
+    isModuleRoot ? null : createButtonRow([
       { label: 'Dupliquer', onClick: duplicateSelection },
       widget.type === 'moduleInstance'
         ? { label: 'Détacher', title: 'Remplace l\'instance par une copie modifiable', onClick: () => detachInstance(widget.id) }
         : { label: '→ Module', title: 'Enregistre ce widget et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(widget.id) },
       { label: 'Supprimer', isDanger: true, onClick: deleteSelection },
     ]),
-  ])];
+  ].filter(Boolean))];
+  if (widget.type === 'moduleInstance') sections.push(createInstanceSettingsSection(widget));
   if (typeDefinition?.fields.length) sections.push(createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition))));
   const sizeAndPlacementFields = [
     createSizeField('Largeur', widget.size?.width, (width) => updateSize('width', width)),
@@ -386,6 +397,88 @@ function createWidgetProperties(widget, record) {
 }
 
 /**
+ * Boutons d'un module du projet : modifier, publier, mettre à jour (selon son état).
+ * @param {string} moduleId module
+ * @returns {HTMLElement|null} rangée
+ */
+function createModuleButtonRow(moduleId) {
+  const module = appState.uiDocument.modules[moduleId];
+  if (!module) return null;
+  const entry = getLibraryEntry(module.libraryId);
+  return createButtonRow([
+    appState.editedModuleId === moduleId ? null : { label: 'Modifier le module', title: 'Ouvre le module sur le canevas : toutes ses instances changent', onClick: () => openModuleEditor(moduleId) },
+    module.hasLocalChanges && entry ? { label: 'Publier dans la bibliothèque', title: 'Nouvelle version, proposée ensuite aux autres projets', onClick: () => publishModule(moduleId) } : null,
+    isModuleUpdateAvailable(module, entry) ? { label: `Mettre à jour (v${module.version} → v${entry.version})`, onClick: () => updateModuleFromLibrary(moduleId) } : null,
+  ].filter(Boolean));
+}
+
+/**
+ * Section « Réglages de cette instance » : change un élément interne sans toucher aux autres instances.
+ * @param {object} instance widget ou area qui utilise un module
+ * @returns {HTMLElement} section
+ */
+function createInstanceSettingsSection(instance) {
+  const entries = listInstanceNodes(appState.uiDocument, instance);
+  if (entries.length === 0) return createPanelSection('Réglages de cette instance', [createElement('div', { className: 'panel-hint', text: 'Module introuvable.' })]);
+  const getEntryKey = (entry) => [...entry.path, entry.node.id].join('/');
+  const selectedEntry = entries.find((entry) => getEntryKey(entry) === innerNodeKeyByInstance.get(instance.id))
+    ?? entries.find((entry) => WIDGET_TYPES[entry.node.type]?.fields.length && !entry.node.children) ?? entries[0];
+  const { node } = selectedEntry;
+  const updateInner = (mutateNode) => updateInstanceNode(instance.id, selectedEntry, mutateNode);
+  const isInstanceRoot = selectedEntry === entries[0];
+  const typeDefinition = WIDGET_TYPES[node.type];
+  const updateState = (key, value) => updateInner((targetNode) => { targetNode.state = { ...targetNode.state, [key]: value }; });
+  const styleChoices = [{ value: '', label: '— aucun —' }, ...Object.entries(appState.uiDocument.styles).map(([styleId, style]) => ({ value: styleId, label: `${style.name} (${styleId})` }))];
+  const changedCount = entries.filter((entry) => entry.isChanged).length;
+  const contentFields = (typeDefinition?.fields ?? []).filter((fieldDefinition) => fieldDefinition.target !== 'widget' && fieldDefinition.kind !== 'pageStackRef');
+  return createPanelSection('Réglages de cette instance', [
+    createElement('div', { className: 'panel-hint', text: 'Change un élément ici sans toucher aux autres instances. ● = différent du module.' }),
+    createSelectField('Élément', getEntryKey(selectedEntry), entries.map((entry) => ({ value: getEntryKey(entry), label: `${'\u2003'.repeat(entry.depth)}${entry.isChanged ? '● ' : ''}${entry.node.name ?? entry.node.id} (${entry.node.id})` })),
+      (entryKey) => { innerNodeKeyByInstance.set(instance.id, entryKey); notifyChange(); }),
+    ...contentFields.map((fieldDefinition) => createWidgetContentField(node, fieldDefinition, updateInner)),
+    ...(isInstanceRoot || !node.type ? [] : [
+      createCheckboxField('Actif', node.state?.enabled !== false, (isEnabled) => updateState('enabled', isEnabled)),
+      createCheckboxField('Visible', node.state?.visible !== false, (isVisible) => updateState('visible', isVisible)),
+      createElement('div', { className: 'field-label', text: 'Action du clic / tap' }),
+      createActionEditor(node.action, (newAction) => updateInner((targetNode) => { targetNode.action = newAction; })),
+    ]),
+    node.moduleId ? null : createPanelSection('Apparence (cette instance)', [
+      createSelectField('Style lié', node.style ?? '', styleChoices, (styleId) => updateInner((targetNode) => setOrDeleteValue(targetNode, 'style', styleId))),
+      ...createAppearanceFields(node.styleOverrides ?? {}, (key, value) => updateInner((targetNode) => {
+        targetNode.styleOverrides ??= {};
+        setOrDeleteValue(targetNode.styleOverrides, key, value);
+      })),
+    ], false),
+    isInstanceRoot ? null : createPanelSection('Événements (cette instance)', [createEventsSection(node, false, updateInner)], false),
+    createButtonRow([
+      selectedEntry.isChanged ? { label: 'Rétablir cet élément', onClick: () => updateInner(null) } : null,
+      changedCount ? { label: `Tout rétablir (${changedCount})`, onClick: () => updateNode(instance.id, (targetInstance) => { targetInstance.overrides = {}; }) } : null,
+    ].filter(Boolean)),
+  ].filter(Boolean));
+}
+
+/**
+ * Paramètres d'un module ouvert sur le canevas.
+ * @param {string} moduleId module
+ * @returns {HTMLElement[]} sections
+ */
+function createModuleProperties(moduleId) {
+  const module = appState.uiDocument.modules[moduleId];
+  const screenSize = createModuleScreen(appState.uiDocument, moduleId).size;
+  const updatePreviewSize = (dimension, value) => updateNode(moduleId, (targetModule) => { if (value > 0) targetModule.previewSize = { ...screenSize, [dimension]: value }; });
+  return [createPanelSection('Module', [
+    createInfoRow('ID', moduleId),
+    createTextField('Nom (anglais)', module.name, (newName) => updateNode(moduleId, (targetModule) => { targetModule.name = newName.trim() || targetModule.name; })),
+    createInfoRow('Version', `v${module.version}${module.hasLocalChanges ? ' · modifié, pas publié' : ''}`),
+    createInfoRow('Instances', String(countModuleInstances(appState.uiDocument, moduleId))),
+    createModuleButtonRow(moduleId),
+    createNumberField('Largeur de l\'aperçu', screenSize.width, (width) => updatePreviewSize('width', width), { min: 40 }),
+    createNumberField('Hauteur de l\'aperçu', screenSize.height, (height) => updatePreviewSize('height', height), { min: 40 }),
+    createTextField('Notes pour le codeur', module.notes, (newNotes) => updateNode(moduleId, (targetModule) => { targetModule.notes = newNotes; }), { isMultiline: true }),
+  ])];
+}
+
+/**
  * Ajoute une page à une pile de pages et l'affiche.
  * @param {string} pageStackId pile de pages
  */
@@ -421,7 +514,8 @@ function createStyleProperties(styleId) {
  */
 function createTreeView() {
   const { uiDocument } = appState;
-  const screen = uiDocument.screens.find((candidate) => candidate.id === appState.currentScreenId);
+  const { editedModuleId } = appState;
+  const screen = editedModuleId ? createModuleScreen(uiDocument, editedModuleId) : uiDocument.screens.find((candidate) => candidate.id === appState.currentScreenId);
   const createTreeRow = (node, depth, kindLabel) => createElement('div', {
     className: `tree-row${node.id === appState.selectedId ? ' is-selected' : ''}`,
     style: { paddingLeft: `${8 + depth * 14}px` },
@@ -438,8 +532,9 @@ function createTreeView() {
     for (const widget of area.widgets ?? []) visitWidget(widget, depth + 1);
   };
   if (screen) {
-    rows.push(createTreeRow(screen, 0, 'écran'));
-    visitArea(screen.root, 1);
+    rows.push(createTreeRow(screen, 0, editedModuleId ? 'module' : 'écran'));
+    if (screen.root.id === editedModuleId) screen.root.widgets.forEach((widget) => visitWidget(widget, 1));
+    else visitArea(screen.root, 1);
   }
   return createElement('div', { className: 'tree-view' }, rows);
 }
@@ -500,6 +595,7 @@ export function renderLeftPanel() {
         + 'Le titre au-dessus du cadre sélectionne l\'écran.<br>Glisse un widget de la bibliothèque (à droite) dans une area, '
         + 'ou touche-le puis touche l\'area.<br><br>Doigt : glisser = déplacer la vue, 2 doigts = zoom.' }));
     } else if (record.kind === 'screen') panelBodyElement.append(...createScreenProperties(record.node));
+    else if (record.kind === 'module') panelBodyElement.append(...createModuleProperties(selectedId));
     else if (record.kind === 'area') panelBodyElement.append(...createAreaProperties(record.node, record));
     else panelBodyElement.append(...createWidgetProperties(record.node, record));
   }

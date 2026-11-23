@@ -1,6 +1,6 @@
 // Fenêtre du haut : projet, écrans, thème affiché, annuler / rétablir, zoom, import / export (PROTOTYPE).
 import { createElement, pickTextFile, saveTextFile } from '../utils/dom.js';
-import { appState, commitChange, notifyChange, replaceDocument, selectNode, stepHistory } from '../model/store.js';
+import { appState, commitChange, notifyChange, replaceDocument, selectNode, showScreen, stepHistory } from '../model/store.js';
 import { SCREEN_PRESETS } from '../model/catalog.js';
 import { createEmptyDocument, createScreen } from '../model/document.js';
 import { buildUiSpecExport, parseUiSpecImport } from '../io/uispecExport.js';
@@ -66,7 +66,7 @@ function addScreenFromPreset(presetKey) {
     uiDocument.screens.push(screen);
     createdScreenId = screen.id;
   });
-  appState.currentScreenId = createdScreenId;
+  showScreen(createdScreenId);
   selectNode(createdScreenId);
 }
 
@@ -77,7 +77,7 @@ export function renderTopBar() {
     on: { change: () => commitChange((targetDocument) => { targetDocument.project.name = projectNameInput.value.trim() || 'MyApp'; }) } });
   projectNameInput.value = uiDocument.project.name;
   const screenSelect = createSelectElement(appState.currentScreenId, uiDocument.screens.map((screen) => ({ value: screen.id, label: `${screen.id} · ${screen.name}` })),
-    (screenId) => { appState.currentScreenId = screenId; appState.selectedId = screenId; notifyChange(); });
+    (screenId) => { showScreen(screenId); appState.selectedId = screenId; notifyChange(); });
   screenSelect.title = 'Écran affiché';
   const addScreenSelect = createSelectElement('', [{ value: '', label: '+ Écran…' }, ...SCREEN_PRESETS.map((preset) => ({ value: preset.key, label: preset.label }))],
     (presetKey) => { if (presetKey) addScreenFromPreset(presetKey); });

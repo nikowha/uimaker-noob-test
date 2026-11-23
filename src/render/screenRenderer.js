@@ -1,6 +1,6 @@
 // Rendu d'un écran : areas découpées, placement des widgets, apparence, thème (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
-import { applyModuleOverrides } from '../model/modules.js';
+import { resolveInstanceRoot } from '../model/modules.js';
 import { applyAppearanceToElement, applyThemeVariables, resolveAppearance } from './styleResolver.js';
 import { fillWidgetContent } from './widgetRenderer.js';
 
@@ -172,9 +172,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       if (!module || parentModuleIds.includes(widget.moduleId)) {
         renderedWidget = { ...widget, type: 'placeholder', content: { description: `Module ${widget.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } };
       } else {
-        const instanceRoot = applyModuleOverrides(module.root, widget.overrides);
-        instanceRoot.size = widget.size ?? instanceRoot.size;
-        instanceRoot.placement = widget.placement;
+        const instanceRoot = resolveInstanceRoot(module, widget);
         const instanceElement = renderWidget(instanceRoot, parentLayout, true, [...parentModuleIds, widget.moduleId]);
         instanceElement.classList.add('ui-component-instance');
         decorateEditorElement(instanceElement, widget, isInsideInstance);
@@ -218,7 +216,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
     if (area.moduleId) {
       const module = uiDocument.modules[area.moduleId];
       const isUsable = module && !parentModuleIds.includes(area.moduleId);
-      const instanceRoot = isUsable ? applyModuleOverrides(module.root, area.overrides) : { widgetLayout: { mode: 'free' },
+      const instanceRoot = isUsable ? resolveInstanceRoot(module, area) : { widgetLayout: { mode: 'free' },
         widgets: [{ id: '', name: area.name, type: 'placeholder', placement: { anchor: 'stretch', x: 0, y: 0 },
           content: { description: `Module ${area.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } }] };
       const instanceElement = renderArea({ ...instanceRoot, sizing: area.sizing, resizableSplitter: area.resizableSplitter }, parentSplit, true, [...parentModuleIds, area.moduleId]);

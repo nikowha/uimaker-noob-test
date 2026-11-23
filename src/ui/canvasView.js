@@ -3,9 +3,10 @@
 // un tap du doigt sélectionne aussi.
 import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, notifyChange, selectNode } from '../model/store.js';
-import { buildNodeIndex, isWidgetHolder } from '../model/document.js';
+import { buildNodeIndex, createModuleScreen, isWidgetHolder } from '../model/document.js';
 import { renderScreen } from '../render/screenRenderer.js';
-import { moveWidget, placeLibraryItem } from './editorActions.js';
+import { countModuleInstances } from '../model/modules.js';
+import { closeModuleEditor, moveWidget, placeLibraryItem } from './editorActions.js';
 
 const DRAG_THRESHOLD_PIXELS = 6;
 const MINIMUM_SCALE = 0.05;
@@ -24,6 +25,7 @@ let viewportElement = null;
 let stageElement = null;
 let lastFittedScreenKey = null;
 let overlayElement = null;
+let moduleBannerElement = null;
 
 /** Applique le zoom / déplacement courant à la scène. */
 function applyViewTransform() {
@@ -31,8 +33,9 @@ function applyViewTransform() {
   stageElement.style.setProperty('--inverse-scale', String(1 / viewTransform.scale));
 }
 
-/** @returns {object|undefined} écran courant */
+/** @returns {object|undefined} écran affiché (écran courant, ou module en cours d'édition) */
 function getCurrentScreen() {
+  if (appState.editedModuleId) return createModuleScreen(appState.uiDocument, appState.editedModuleId);
   return appState.uiDocument.screens.find((screen) => screen.id === appState.currentScreenId);
 }
 
@@ -228,14 +231,29 @@ function setGestureActive(isActive) {
   viewportElement.classList.toggle('is-gesture-active', isActive);
 }
 
+/** Affiche ou cache le bandeau d'édition d'un module. */
+function renderModuleBanner() {
+  const { editedModuleId, uiDocument, parentModuleIds } = appState;
+  moduleBannerElement.hidden = !editedModuleId;
+  viewportElement.classList.toggle('is-editing-module', Boolean(editedModuleId));
+  if (!editedModuleId) return;
+  const instanceCount = countModuleInstances(uiDocument, editedModuleId);
+  const parentModule = uiDocument.modules[parentModuleIds.at(-1)];
+  moduleBannerElement.replaceChildren(
+    createElement('span', { text: `Module ${editedModuleId} · ${uiDocument.modules[editedModuleId].name} — change ${instanceCount} instance(s) de ce projet` }),
+    createElement('button', { text: parentModule ? `Terminé (retour à ${parentModule.name})` : 'Terminé', attributes: { type: 'button' }, on: { click: closeModuleEditor } }),
+  );
+}
+
 /** Redessine l'écran courant (après chaque changement). */
 export function renderCanvasView() {
   const screen = getCurrentScreen();
+  renderModuleBanner();
   stageElement.replaceChildren();
   if (!screen) return;
   const screenTitle = createElement('div', {
     className: `canvas-screen-title${appState.selectedId === screen.id ? ' is-selected' : ''}`,
-    text: `${screen.id} · ${screen.name} — ${screen.size.width}×${screen.size.height} · ${screen.platform}`,
+    text: `${screen.id} · ${screen.name} — ${screen.size.width}×${screen.size.height} · ${appState.editedModuleId ? 'aperçu du module' : screen.platform}`,
     dataset: { selectScreenId: screen.id },
   });
   const screenElement = renderScreen(appState.uiDocument, screen, {
@@ -250,7 +268,7 @@ export function renderCanvasView() {
   const screenKey = `${screen.id}:${screen.size.width}x${screen.size.height}`;
   if (screenKey !== lastFittedScreenKey) {
     lastFittedScreenKey = screenKey;
-    requestAnimationFrame(fitScreenInView);
+    fitScreenInView();
   }
 }
 
@@ -674,10 +692,13 @@ export function zoomFromButton(zoomFactor) {
  */
 export function createCanvasView() {
   stageElement = createElement('div', { className: 'canvas-stage' });
+  // Les appuis sur le bandeau ne doivent pas partir au canevas (il capturerait le pointeur).
+  moduleBannerElement = createElement('div', { className: 'module-banner', on: { pointerdown: (pointerEvent) => pointerEvent.stopPropagation() } });
+  moduleBannerElement.hidden = true;
   viewportElement = createElement('div', { className: 'canvas-viewport', on: {
     pointerdown: handlePointerDown, pointermove: handlePointerMove, pointerup: handlePointerEnd, pointercancel: handlePointerEnd,
     wheel: handleWheel, contextmenu: (contextEvent) => contextEvent.preventDefault(),
-  } }, [stageElement]);
+  } }, [stageElement, moduleBannerElement]);
   new ResizeObserver(() => { if (!currentGesture) fitScreenInView(); }).observe(viewportElement);
   viewportElement.addEventListener('scroll', () => { viewportElement.scrollLeft = 0; viewportElement.scrollTop = 0; });
   return viewportElement;

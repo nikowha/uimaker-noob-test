@@ -92,12 +92,18 @@ export function createModuleFileText(entries) {
 
 /**
  * Importe un fichier : ajoute les nouveaux modules, remplace ceux dont la version est plus ancienne.
+ * Même numéro de version mais contenu publié ailleurs (iPad et PC) : on demande lequel garder.
  * @param {string} fileText contenu
+ * @param {(entry: object) => boolean} shouldReplaceConflict question posée pour chaque conflit
  * @returns {Promise<{addedCount: number, skippedCount: number}>} bilan
  */
-export async function importModuleFile(fileText) {
+export async function importModuleFile(fileText, shouldReplaceConflict) {
   const importedEntries = parseModuleFile(fileText);
-  const keptEntries = importedEntries.filter((entry) => !entriesById.has(entry.libraryId) || entriesById.get(entry.libraryId).version < entry.version);
+  const keptEntries = importedEntries.filter((entry) => {
+    const existingEntry = entriesById.get(entry.libraryId);
+    if (!existingEntry || existingEntry.version < entry.version) return true;
+    return existingEntry.version === entry.version && existingEntry.updatedAt !== entry.updatedAt && shouldReplaceConflict(entry);
+  });
   await runWrite((objectStore) => keptEntries.forEach((entry) => objectStore.put(entry)));
   for (const entry of keptEntries) entriesById.set(entry.libraryId, entry);
   notifyChange();

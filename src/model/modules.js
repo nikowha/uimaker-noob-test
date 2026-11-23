@@ -18,8 +18,56 @@ export function saveNodeAsModule(uiDocument, node) {
   const kind = node.type ? 'widget' : 'area';
   const removedKeys = kind === 'area' ? ['placement', 'sizing', 'resizableSplitter'] : ['placement'];
   for (const removedKey of removedKeys) delete moduleRoot[removedKey];
-  uiDocument.modules[moduleId] = { name: node.name || 'Module', kind, libraryId: crypto.randomUUID(), version: 1, notes: '', root: moduleRoot };
+  uiDocument.modules[moduleId] = { name: node.name || 'Module', kind, libraryId: crypto.randomUUID(), version: 1, libraryUpdatedAt: new Date().toISOString(), notes: '', root: moduleRoot };
+  ensureModuleNodeKeys(moduleRoot);
   return moduleId;
+}
+
+/**
+ * Liste les éléments directement contenus dans un nœud.
+ * @param {object} node area ou widget
+ * @returns {object[]} enfants
+ */
+function getChildNodes(node) {
+  return [...(node.children ?? []), ...(node.widgets ?? [])];
+}
+
+/**
+ * Donne à chaque élément d'un module une clé stable, pour le reconnaître d'un projet à l'autre (les ID changent).
+ * @param {object} moduleRoot racine, modifiée sur place
+ */
+function ensureModuleNodeKeys(moduleRoot) {
+  const usedKeys = new Set();
+  const visitNode = (node) => {
+    if (!node.moduleNodeKey || usedKeys.has(node.moduleNodeKey)) node.moduleNodeKey = crypto.randomUUID();
+    usedKeys.add(node.moduleNodeKey);
+    getChildNodes(node).forEach(visitNode);
+  };
+  visitNode(moduleRoot);
+}
+
+/**
+ * Relie les éléments de deux versions d'un module : par clé, sinon par position et type (anciens modules sans clé).
+ * @param {object} packageRoot version de la bibliothèque
+ * @param {object} projectRoot version du projet
+ * @returns {Map<string, string>} ID bibliothèque → ID projet
+ */
+function matchModuleNodeIds(packageRoot, projectRoot) {
+  const projectIdsByKey = new Map();
+  const visitNode = (node, position, onNode) => {
+    onNode(node, `${position}:${node.type ?? 'area'}`);
+    getChildNodes(node).forEach((childNode, childIndex) => visitNode(childNode, `${position}/${childIndex}`, onNode));
+  };
+  visitNode(projectRoot, '', (node, positionKey) => projectIdsByKey.set(node.moduleNodeKey ?? positionKey, node.id));
+  const idMapping = new Map([[packageRoot.id, projectRoot.id]]);
+  const usedIds = new Set([projectRoot.id]);
+  visitNode(packageRoot, '', (node, positionKey) => {
+    const projectId = projectIdsByKey.get(node.moduleNodeKey) ?? projectIdsByKey.get(positionKey);
+    if (idMapping.has(node.id) || !projectId || usedIds.has(projectId)) return;
+    idMapping.set(node.id, projectId);
+    usedIds.add(projectId);
+  });
+  return idMapping;
 }
 
 /**
@@ -48,21 +96,97 @@ export function placeAreaModule(area, moduleId) {
   return true;
 }
 
+const MERGED_OVERRIDE_KEYS = ['content', 'state', 'styleOverrides'];
+const REPLACED_OVERRIDE_KEYS = ['style', 'action', 'events'];
+
+/**
+ * Fusionne des valeurs ; null efface une valeur.
+ * @param {object|undefined} baseValues valeurs de départ
+ * @param {object} changedValues changements
+ * @returns {object} résultat
+ */
+function mergeValues(baseValues, changedValues) {
+  return Object.fromEntries(Object.entries({ ...baseValues, ...changedValues }).filter(([, value]) => value !== null));
+}
+
+/**
+ * Applique des réglages d'instance à un élément (sans son contenu). Pour un module imbriqué, les réglages passent à l'instance.
+ * @param {object} node élément, modifié sur place
+ * @param {object|undefined} nodeOverride réglages
+ */
+function applyNodeOverride(node, nodeOverride) {
+  if (!nodeOverride) return;
+  for (const key of MERGED_OVERRIDE_KEYS) if (nodeOverride[key]) node[key] = mergeValues(node[key], nodeOverride[key]);
+  for (const key of REPLACED_OVERRIDE_KEYS) {
+    if (nodeOverride[key] === null) delete node[key];
+    else if (nodeOverride[key] !== undefined) node[key] = cloneJson(nodeOverride[key]);
+  }
+  if (nodeOverride.overrides) node.overrides = mergeOverrides(node.overrides, nodeOverride.overrides);
+}
+
+/**
+ * Fusionne deux jeux de réglages d'instance (le second l'emporte).
+ * @param {object|undefined} baseOverrides réglages définis dans le module
+ * @param {object} outerOverrides réglages de l'instance qui l'entoure
+ * @returns {object} réglages
+ */
+function mergeOverrides(baseOverrides, outerOverrides) {
+  const merged = cloneJson(baseOverrides ?? {});
+  for (const [nodeId, outerOverride] of Object.entries(outerOverrides)) {
+    const nodeOverride = merged[nodeId] ??= {};
+    for (const key of MERGED_OVERRIDE_KEYS) if (outerOverride[key]) nodeOverride[key] = { ...nodeOverride[key], ...cloneJson(outerOverride[key]) };
+    for (const key of REPLACED_OVERRIDE_KEYS) if (outerOverride[key] !== undefined) nodeOverride[key] = cloneJson(outerOverride[key]);
+    if (outerOverride.overrides) nodeOverride.overrides = mergeOverrides(nodeOverride.overrides, outerOverride.overrides);
+  }
+  return merged;
+}
+
 /**
  * Applique les réglages propres d'une instance au contenu du module.
  * @param {object} moduleRoot racine du module
- * @param {object} overrides { idInterne: { content } }
+ * @param {object} overrides { idInterne: { content, state, styleOverrides, style, action, events, overrides } }
  * @returns {object} copie
  */
 export function applyModuleOverrides(moduleRoot, overrides) {
   const rootCopy = cloneJson(moduleRoot);
   const visitNode = (node) => {
-    const nodeOverride = overrides?.[node.id];
-    if (nodeOverride?.content) node.content = { ...node.content, ...nodeOverride.content };
-    for (const childNode of [...(node.children ?? []), ...(node.widgets ?? [])]) visitNode(childNode);
+    applyNodeOverride(node, overrides?.[node.id]);
+    getChildNodes(node).forEach(visitNode);
   };
   visitNode(rootCopy);
   return rootCopy;
+}
+
+/**
+ * Contenu réel d'une instance : module + réglages + ce que l'instance décide (taille, place, état, action).
+ * @param {object} module module
+ * @param {object} instance widget ou area qui utilise le module
+ * @returns {object} racine (avec les ID du module)
+ */
+export function resolveInstanceRoot(module, instance) {
+  const root = applyModuleOverrides(module.root, instance.overrides);
+  const instanceKeys = module.kind === 'area' ? ['sizing', 'resizableSplitter'] : ['placement'];
+  for (const key of instanceKeys) {
+    if (instance[key] === undefined) delete root[key]; else root[key] = cloneJson(instance[key]);
+  }
+  root.name = instance.name;
+  if (instance.size) root.size = cloneJson(instance.size);
+  if (instance.state) root.state = { ...root.state, ...instance.state };
+  if (instance.action && instance.action.type !== 'none') root.action = cloneJson(instance.action);
+  if (instance.events?.length) root.events = [...cloneJson(instance.events), ...(root.events ?? [])];
+  return root;
+}
+
+/**
+ * Remplace une instance par son contenu, sur place. Son ID ne change pas : les liens vers elle restent bons.
+ * @param {object} uiDocument document
+ * @param {object} instance widget ou area
+ */
+function replaceInstanceByContent(uiDocument, instance) {
+  const detachedNode = cloneSubtreeWithNewIds(uiDocument, resolveInstanceRoot(uiDocument.modules[instance.moduleId], instance), instance.id);
+  if (instance.notes) detachedNode.notes = instance.notes;
+  for (const key of Object.keys(instance)) delete instance[key];
+  Object.assign(instance, detachedNode);
 }
 
 /**
@@ -72,24 +196,126 @@ export function applyModuleOverrides(moduleRoot, overrides) {
  * @returns {string|null} ID de l'élément détaché
  */
 export function detachModuleInstance(uiDocument, instanceId) {
-  const record = buildNodeIndex(uiDocument).get(instanceId);
-  const instance = record?.node;
-  const module = instance ? uiDocument.modules[instance.moduleId] : null;
-  if (!module) return null;
-  const detachedNode = cloneSubtreeWithNewIds(uiDocument, applyModuleOverrides(module.root, instance.overrides));
-  detachedNode.name = instance.name;
-  if (record.kind === 'area') {
-    delete instance.moduleId;
-    delete instance.overrides;
-    const { id: unusedId, notes: unusedNotes, events: moduleEvents, ...detachedValues } = detachedNode;
-    Object.assign(instance, detachedValues);
-    if (!instance.events?.length && moduleEvents) instance.events = moduleEvents;
-    return instance.id;
+  const instance = buildNodeIndex(uiDocument).get(instanceId)?.node;
+  if (!uiDocument.modules[instance?.moduleId]) return null;
+  replaceInstanceByContent(uiDocument, instance);
+  return instanceId;
+}
+
+/**
+ * Remplace toutes les instances des écrans par leur contenu (mode test, sur une copie du document).
+ * @param {object} uiDocument copie du document
+ */
+export function expandAllModuleInstances(uiDocument) {
+  const moduleMenuIds = new Set();
+  for (const module of Object.values(uiDocument.modules)) {
+    const references = createReferenceSets();
+    collectReferences(module.root, references);
+    references.menus.forEach((menuId) => moduleMenuIds.add(menuId));
   }
-  for (const key of ['size', 'placement', 'state', 'action']) if (instance[key]) detachedNode[key] = cloneJson(instance[key]);
-  if (instance.events?.length) detachedNode.events = cloneJson(instance.events);
-  record.siblings[record.siblings.indexOf(instance)] = detachedNode;
-  return detachedNode.id;
+  const expandNode = (node, parentModuleIds) => {
+    let insideModuleIds = parentModuleIds;
+    while (node.moduleId && uiDocument.modules[node.moduleId] && !insideModuleIds.includes(node.moduleId)) {
+      insideModuleIds = [...insideModuleIds, node.moduleId];
+      replaceInstanceByContent(uiDocument, node);
+    }
+    getChildNodes(node).forEach((childNode) => expandNode(childNode, insideModuleIds));
+  };
+  for (const screen of uiDocument.screens) expandNode(screen.root, []);
+  uiDocument.modules = {};
+  deleteUnusedMenus(uiDocument, moduleMenuIds);
+}
+
+/**
+ * Supprime des menus si plus rien ne les utilise.
+ * @param {object} uiDocument document
+ * @param {Iterable<string>} menuIds menus à vérifier
+ */
+function deleteUnusedMenus(uiDocument, menuIds) {
+  for (const menuId of menuIds) {
+    const { [menuId]: checkedMenu, ...otherMenus } = uiDocument.menus;
+    const usersText = JSON.stringify([uiDocument.screens, uiDocument.modules, otherMenus]);
+    if (checkedMenu && !usersText.includes(`"menuId":"${menuId}"`)) delete uiDocument.menus[menuId];
+  }
+}
+
+/**
+ * Liste les éléments internes d'une instance, modules imbriqués compris.
+ * @param {object} uiDocument document
+ * @param {object} instance widget ou area
+ * @returns {Array<{path: string[], node: object, baseNode: object, depth: number, isChanged: boolean}>} éléments :
+ *   path = instances imbriquées à traverser, node = valeurs affichées, baseNode = valeurs du module
+ */
+export function listInstanceNodes(uiDocument, instance) {
+  const entries = [];
+  const visitModule = (moduleId, overrides, baseOverrides, ownOverrides, path, depth, parentModuleIds) => {
+    const module = uiDocument.modules[moduleId];
+    if (!module || parentModuleIds.includes(moduleId)) return;
+    const visitPair = (node, baseNode, nodeDepth) => {
+      const ownOverride = ownOverrides?.[node.id];
+      entries.push({ path, node, baseNode, depth: nodeDepth, isChanged: [...MERGED_OVERRIDE_KEYS, ...REPLACED_OVERRIDE_KEYS].some((key) => ownOverride?.[key] !== undefined) });
+      if (node.moduleId) visitModule(node.moduleId, node.overrides, baseNode.overrides, ownOverride?.overrides, [...path, node.id], nodeDepth + 1, [...parentModuleIds, moduleId]);
+      const baseChildren = getChildNodes(baseNode);
+      getChildNodes(node).forEach((childNode, childIndex) => visitPair(childNode, baseChildren[childIndex], nodeDepth + 1));
+    };
+    visitPair(applyModuleOverrides(module.root, overrides), applyModuleOverrides(module.root, baseOverrides), depth);
+  };
+  visitModule(instance.moduleId, instance.overrides, {}, instance.overrides, [], 0, []);
+  return entries;
+}
+
+/**
+ * Compare deux jeux de valeurs.
+ * @param {object} [baseValues] valeurs du module
+ * @param {object} [newValues] valeurs voulues
+ * @returns {object|undefined} changements (null = valeur effacée), undefined s'il n'y en a pas
+ */
+function diffValues(baseValues = {}, newValues = {}) {
+  const changes = {};
+  for (const key of new Set([...Object.keys(baseValues), ...Object.keys(newValues)])) {
+    if (JSON.stringify(baseValues[key]) !== JSON.stringify(newValues[key])) changes[key] = newValues[key] ?? null;
+  }
+  return Object.keys(changes).length ? changes : undefined;
+}
+
+/**
+ * Enregistre les réglages d'un élément interne pour une instance (seulement ce qui diffère du module).
+ * @param {object} instance instance, modifiée sur place
+ * @param {{path: string[], baseNode: object}} entry élément (listInstanceNodes)
+ * @param {object|null} newNode valeurs voulues, null pour revenir au module
+ */
+export function setInstanceNodeValues(instance, entry, newNode) {
+  let overrides = instance.overrides ??= {};
+  for (const nestedInstanceId of entry.path) overrides = (overrides[nestedInstanceId] ??= {}).overrides ??= {};
+  const { baseNode } = entry;
+  const nodeOverride = {};
+  if (newNode) {
+    for (const key of MERGED_OVERRIDE_KEYS) {
+      const changes = diffValues(baseNode[key], newNode[key]);
+      if (changes) nodeOverride[key] = changes;
+    }
+    for (const key of REPLACED_OVERRIDE_KEYS) {
+      if (JSON.stringify(baseNode[key]) !== JSON.stringify(newNode[key])) nodeOverride[key] = newNode[key] ?? null;
+    }
+  }
+  const nestedOverrides = overrides[baseNode.id]?.overrides;
+  if (nestedOverrides) nodeOverride.overrides = nestedOverrides;
+  overrides[baseNode.id] = nodeOverride;
+  removeEmptyOverrides(instance.overrides);
+}
+
+/**
+ * Retire les réglages vides.
+ * @param {object} overrides réglages, modifiés sur place
+ */
+function removeEmptyOverrides(overrides) {
+  for (const [nodeId, nodeOverride] of Object.entries(overrides)) {
+    if (nodeOverride.overrides) {
+      removeEmptyOverrides(nodeOverride.overrides);
+      if (Object.keys(nodeOverride.overrides).length === 0) delete nodeOverride.overrides;
+    }
+    if (Object.keys(nodeOverride).length === 0) delete overrides[nodeId];
+  }
 }
 
 /**
@@ -187,28 +413,44 @@ export function buildLibraryEntry(uiDocument, moduleId) {
   for (const colorVariable of Object.values(colorVariables)) {
     colorVariable.values = Object.fromEntries(Object.entries(colorVariable.values).map(([themeId, color]) => [uiDocument.themes[themeId]?.name ?? themeId, color]));
   }
+  for (const packagedModule of Object.values(modules)) delete packagedModule.hasLocalChanges;
   return { libraryId: module.libraryId, version: module.version ?? 1, name: module.name, kind: module.kind, category: '', tags: [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: module.libraryUpdatedAt ?? new Date().toISOString(),
     package: { rootModuleId: moduleId, modules, menus, colorVariables, styles: pickEntries(uiDocument.styles, references.styles) } };
 }
 
 /**
- * Installe un module de la bibliothèque dans le projet (avec ses sous-modules). Un module déjà présent est réutilisé.
+ * Installe un module de la bibliothèque dans le projet (avec ses sous-modules). Un module déjà présent est réutilisé,
+ * ou remplacé si on demande une mise à jour : ses éléments gardent leurs ID, donc les réglages des instances restent.
  * Une variable de couleur de même nom reprend celle du projet.
  * @param {object} uiDocument document
  * @param {object} entry entrée de bibliothèque
+ * @param {boolean} [shouldUpdate] vrai pour mettre à jour le module (et ses sous-modules plus anciens, sauf modifiés ici)
  * @returns {string} ID du module dans le projet
+ * @throws {Error} si un module finirait par se contenir lui-même
  */
-export function installLibraryEntry(uiDocument, entry) {
+export function installLibraryEntry(uiDocument, entry, shouldUpdate = false) {
   const packageData = cloneJson(entry.package);
   const idMapping = new Map();
   const newModuleIds = [];
+  const replacedMenuIds = new Set();
   for (const [packageModuleId, packagedModule] of Object.entries(packageData.modules)) {
     const existingModule = Object.entries(uiDocument.modules).find(([, candidate]) => candidate.libraryId === packagedModule.libraryId);
-    if (existingModule) { idMapping.set(packageModuleId, existingModule[0]); continue; }
+    idMapping.set(packageModuleId, existingModule?.[0] ?? createId(uiDocument, 'G'));
+    if (existingModule) {
+      const [, projectModule] = existingModule;
+      matchModuleNodeIds(packagedModule.root, projectModule.root).forEach((projectId, packageId) => idMapping.set(packageId, projectId));
+      const isRootModule = packageModuleId === packageData.rootModuleId;
+      const isUpdated = shouldUpdate && (isRootModule || (packagedModule.version > projectModule.version && !projectModule.hasLocalChanges));
+      if (!isUpdated) continue;
+      const oldReferences = createReferenceSets();
+      collectReferences(projectModule.root, oldReferences);
+      oldReferences.menus.forEach((menuId) => replacedMenuIds.add(menuId));
+    }
     newModuleIds.push(packageModuleId);
-    idMapping.set(packageModuleId, createId(uiDocument, 'G'));
-    for (const nodeId of collectSubtreeNodeIds(packagedModule.root)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
+    for (const nodeId of collectSubtreeNodeIds(packagedModule.root)) {
+      if (!idMapping.has(nodeId)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
+    }
   }
   const references = collectModuleDependencies(packageData, newModuleIds, false);
   for (const variableId of references.colorVariables) {
@@ -235,9 +477,11 @@ export function installLibraryEntry(uiDocument, entry) {
   for (const menuId of installedMenuIds) uiDocument.menus[idMapping.get(menuId)] = remapIds(packageData.menus[menuId], idMapping);
   for (const packageModuleId of newModuleIds) {
     const module = remapIds(packageData.modules[packageModuleId], idMapping);
-    if (packageModuleId === packageData.rootModuleId) module.name = entry.name;
+    if (packageModuleId === packageData.rootModuleId) Object.assign(module, { name: entry.name, libraryUpdatedAt: entry.updatedAt });
     uiDocument.modules[idMapping.get(packageModuleId)] = module;
   }
+  deleteUnusedMenus(uiDocument, replacedMenuIds);
+  assertNoModuleCycle(uiDocument);
   return idMapping.get(packageData.rootModuleId);
 }
 
@@ -253,6 +497,49 @@ function hasModuleCycle(modules, moduleId, ancestorIds = []) {
   const references = createReferenceSets();
   collectReferences(modules[moduleId]?.root, references);
   return [...references.modules].some((childId) => hasModuleCycle(modules, childId, [...ancestorIds, moduleId]));
+}
+
+/**
+ * Vérifie qu'aucun module ne se contient lui-même.
+ * @param {object} uiDocument document
+ * @throws {Error} si un module se contient
+ */
+export function assertNoModuleCycle(uiDocument) {
+  const loopingId = Object.keys(uiDocument.modules).find((moduleId) => hasModuleCycle(uiDocument.modules, moduleId));
+  if (loopingId) throw new Error(`Le module « ${uiDocument.modules[loopingId].name} » se contiendrait lui-même`);
+}
+
+/**
+ * Indique si la bibliothèque a une version plus récente (ou différente) d'un module du projet.
+ * @param {object} module module du projet
+ * @param {object|undefined} entry entrée de bibliothèque
+ * @returns {boolean} vrai si une mise à jour peut être proposée
+ */
+export function isModuleUpdateAvailable(module, entry) {
+  if (!entry) return false;
+  if (entry.version !== module.version) return entry.version > module.version;
+  return Boolean(module.libraryUpdatedAt) && entry.updatedAt !== module.libraryUpdatedAt;
+}
+
+/**
+ * Prépare la publication d'un module : nouvelle version, avec ses sous-modules modifiés.
+ * @param {object} uiDocument document
+ * @param {string} moduleId module
+ * @param {(libraryId: string) => object|undefined} getEntry lit la bibliothèque
+ * @returns {string[]} modules à envoyer dans la bibliothèque
+ */
+export function preparePublication(uiDocument, moduleId, getEntry) {
+  const dependencies = [...collectModuleDependencies(uiDocument, [moduleId], true).modules];
+  const publishedIds = dependencies.filter((candidateId) => candidateId === moduleId || uiDocument.modules[candidateId]?.hasLocalChanges);
+  for (const publishedId of publishedIds) {
+    const module = uiDocument.modules[publishedId];
+    const libraryVersion = getEntry(module.libraryId)?.version ?? 0;
+    module.version = libraryVersion === 0 ? module.version : Math.max(module.version, libraryVersion) + 1;
+    module.libraryUpdatedAt = new Date().toISOString();
+    delete module.hasLocalChanges;
+    ensureModuleNodeKeys(module.root);
+  }
+  return publishedIds;
 }
 
 /**

@@ -344,3 +344,12 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .module-preview > .ui-screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-shadow: none; }
 .module-details > summary { font-size: 11px; color: var(--editor-text-muted); padding: 6px 2px; cursor: pointer; }
 .panel-section > input[type="text"] { width: 100%; }
+
+/* ---- Édition d'un module sur le canevas ---- */
+.canvas-viewport.is-editing-module { box-shadow: inset 0 0 0 2px #b98cff; }
+.module-banner {
+  position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px;
+  width: max-content; max-width: calc(100% - 16px); padding: 4px 6px 4px 12px; border-radius: 8px; background: #3a2b57; color: #fff; font-size: 12px;
+}
+.module-banner[hidden] { display: none; }
+.module-banner button { min-height: var(--touch-target); white-space: nowrap; }

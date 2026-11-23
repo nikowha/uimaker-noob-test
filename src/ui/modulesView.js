@@ -2,10 +2,10 @@
 import { createElement, pickTextFile, saveTextFile } from '../utils/dom.js';
 import { appState, commitChange, notifyChange } from '../model/store.js';
 import { createEmptyDocument } from '../model/document.js';
-import { countModuleInstances, installLibraryEntry } from '../model/modules.js';
+import { countModuleInstances, installLibraryEntry, isModuleUpdateAvailable } from '../model/modules.js';
 import { createModuleFileText, deleteLibraryEntry, getLibraryEntry, importModuleFile, listLibraryEntries, putLibraryEntry } from '../io/moduleLibrary.js';
 import { renderScreen } from '../render/screenRenderer.js';
-import { sendModuleToLibrary } from './editorActions.js';
+import { openModuleEditor, publishModule, updateModuleFromLibrary } from './editorActions.js';
 import { createButtonRow, createPanelSection, createTextField } from './fields.js';
 
 const PREVIEW_WIDTH = 104;
@@ -90,7 +90,8 @@ async function importModules() {
   try {
     const fileText = await pickTextFile();
     if (fileText === null) return;
-    const { addedCount, skippedCount } = await importModuleFile(fileText);
+    const { addedCount, skippedCount } = await importModuleFile(fileText,
+      (entry) => confirm(`« ${entry.name} » v${entry.version} a été modifié des deux côtés. Remplacer celui de cet appareil par celui du fichier ?`));
     alert(`${addedCount} module(s) ajouté(s) ou mis à jour, ${skippedCount} déjà présent(s).`);
   } catch (error) {
     reportLibraryError('Import impossible', error);
@@ -132,13 +133,19 @@ function createLibraryCard(entry, createTile) {
  */
 function createProjectCard(moduleId, module, createTile) {
   const instanceCount = countModuleInstances(appState.uiDocument, moduleId);
+  const libraryEntry = getLibraryEntry(module.libraryId);
+  const hasUpdate = isModuleUpdateAvailable(module, libraryEntry);
+  const stateText = `${module.hasLocalChanges ? ' · modifié' : ''}${hasUpdate ? ` · v${libraryEntry.version} dispo` : ''}`;
   const tile = createTile({ kind: 'module', value: moduleId, label: module.name },
-    createModulePreview(appState.uiDocument, moduleId, appState.currentThemeId), `${moduleId} · ${instanceCount} inst.`);
+    createModulePreview(appState.uiDocument, moduleId, appState.currentThemeId), `${moduleId} · v${module.version} · ${instanceCount} inst.${stateText}`);
   return createElement('div', { className: 'module-card' }, [tile, createCardDetails(moduleId, [
     createElement('summary', { text: module.kind === 'area' ? 'Module d\'area' : 'Module de widgets' }),
     createTextField('Nom', module.name, (name) => commitChange((uiDocument) => { uiDocument.modules[moduleId].name = name.trim() || module.name; })),
     createButtonRow([
-      ...(getLibraryEntry(module.libraryId) ? [] : [{ label: '→ Bibliothèque', onClick: () => sendModuleToLibrary(moduleId) }]),
+      { label: 'Modifier', title: 'Ouvre le module sur le canevas', onClick: () => openModuleEditor(moduleId) },
+      ...(libraryEntry ? [] : [{ label: '→ Bibliothèque', onClick: () => publishModule(moduleId) }]),
+      ...(libraryEntry && module.hasLocalChanges ? [{ label: 'Publier', title: 'Nouvelle version dans la bibliothèque', onClick: () => publishModule(moduleId) }] : []),
+      ...(hasUpdate ? [{ label: `Mettre à jour → v${libraryEntry.version}`, onClick: () => updateModuleFromLibrary(moduleId) }] : []),
       { label: 'Supprimer', isDanger: true, onClick: () => {
         if (instanceCount > 0) { alert(`Ce module est utilisé ${instanceCount} fois : supprime ou détache d'abord ses instances.`); return; }
         commitChange((uiDocument) => { delete uiDocument.modules[moduleId]; });

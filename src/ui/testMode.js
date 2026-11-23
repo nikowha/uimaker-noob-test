@@ -5,6 +5,7 @@
 import { createElement } from '../utils/dom.js';
 import { appSettings, appState, updateAppSetting } from '../model/store.js';
 import { buildNodeIndex, cloneJson } from '../model/document.js';
+import { expandAllModuleInstances } from '../model/modules.js';
 import { getTriggerFallbacks } from '../model/interactions.js';
 import { renderScreen } from '../render/screenRenderer.js';
 import { createSelectElement } from './fields.js';
@@ -663,9 +664,19 @@ function rotateMainScreen() {
   renderTestScreens();
 }
 
+/**
+ * Copie du projet pour le test : chaque instance de module y devient un vrai contenu, actif et indépendant.
+ * @returns {object} document
+ */
+function createTestDocument() {
+  const testDocument = cloneJson(appState.uiDocument);
+  expandAllModuleInstances(testDocument);
+  return testDocument;
+}
+
 /** Remet tout dans l'état de départ (copie fraîche du projet). */
 function resetTestState() {
-  testSession.testDocument = cloneJson(appState.uiDocument);
+  testSession.testDocument = createTestDocument();
   testSession.dialogStack = [];
   closeAllMenus();
   renderTestScreens();
@@ -719,7 +730,7 @@ export function openTestMode() {
   const menuLayerElement = createElement('div', { className: 'test-menu-layer' });
   const overlayElement = createElement('div', { className: 'test-mode' }, [toolbarElement, viewportElement, toastElement, menuLayerElement]);
   testSession = {
-    testDocument: cloneJson(appState.uiDocument), screenId: appState.currentScreenId, themeId: appState.currentThemeId,
+    testDocument: createTestDocument(), screenId: appState.currentScreenId, themeId: appState.currentThemeId,
     scale: 1, dialogStack: [], overlayElement, viewportElement, toolbarElement, toastElement,
     sizeLabel: createElement('span', { className: 'test-size-label' }), toastTimer: null,
     pressSession: null, lastTap: null, hoveredWidgetId: null, lastWheelTime: 0,

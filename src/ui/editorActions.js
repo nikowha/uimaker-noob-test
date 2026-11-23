@@ -1,10 +1,13 @@
 // Actions de l'éditeur partagées par le canevas, les panneaux et le clavier (PROTOTYPE).
-import { appState, commitChange, selectNode } from '../model/store.js';
+import { appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import {
   buildNodeIndex, cloneJson, cloneSubtreeWithNewIds, createWidget, deleteArea, deleteStyle,
   insertWidget, isWidgetHolder, removeWidget, splitArea,
 } from '../model/document.js';
-import { buildLibraryEntry, createModuleInstance, detachModuleInstance, installLibraryEntry, placeAreaModule, saveNodeAsModule } from '../model/modules.js';
+import {
+  assertNoModuleCycle, buildLibraryEntry, createModuleInstance, detachModuleInstance, installLibraryEntry, isModuleUpdateAvailable, placeAreaModule,
+  preparePublication, saveNodeAsModule, setInstanceNodeValues,
+} from '../model/modules.js';
 import { getLibraryEntry, putLibraryEntry } from '../io/moduleLibrary.js';
 
 const ICON_TARGET_TYPES = new Set(['button', 'icon']);
@@ -41,9 +44,11 @@ export function findDefaultHolderId() {
   const nodeIndex = buildNodeIndex(appState.uiDocument);
   const selectedRecord = appState.selectedId ? nodeIndex.get(appState.selectedId) : null;
   if (selectedRecord && selectedRecord.kind !== 'screen' && isWidgetHolder(selectedRecord.node)) return selectedRecord.node.id;
-  if (selectedRecord?.kind === 'widget') return selectedRecord.parent.id;
+  if (selectedRecord?.kind === 'widget' && selectedRecord.siblings) return selectedRecord.parent.id;
+  const editedRoot = appState.uiDocument.modules[appState.editedModuleId]?.root;
+  if (editedRoot && isWidgetHolder(editedRoot)) return editedRoot.id;
   for (const record of nodeIndex.values()) {
-    if (record.kind === 'area' && record.screen.id === appState.currentScreenId && isWidgetHolder(record.node)) return record.node.id;
+    if (record.kind === 'area' && record.screen.id === (appState.editedModuleId ?? appState.currentScreenId) && isWidgetHolder(record.node)) return record.node.id;
   }
   return null;
 }
@@ -86,7 +91,22 @@ function findEnclosingArea(uiDocument, nodeId) {
   const nodeIndex = buildNodeIndex(uiDocument);
   let record = nodeIndex.get(nodeId);
   while (record?.kind === 'widget') record = nodeIndex.get(record.parent.id);
-  return record?.node;
+  return record?.kind === 'area' ? record.node : undefined;
+}
+
+/**
+ * Pose un élément ; refuse un module qui finirait par se contenir lui-même.
+ * @param {(uiDocument: object) => void} placeItem pose
+ * @returns {boolean} vrai si c'est posé
+ */
+function commitPlacement(placeItem) {
+  let errorMessage = null;
+  const isPlaced = commitChange((uiDocument) => {
+    placeItem(uiDocument);
+    try { assertNoModuleCycle(uiDocument); } catch (error) { errorMessage = error.message; throw error; }
+  });
+  if (!isPlaced) { alert(`Impossible de poser cet élément : ${errorMessage ?? 'erreur interne'}.`); notifyChange(); }
+  return isPlaced;
 }
 
 /**
@@ -101,11 +121,11 @@ function placeAreaModuleItem(libraryItem, holderId) {
     alert(`« ${targetArea.name} » n'est pas vide. Un module d'area se pose dans une area vide : divise d'abord cette area.`);
     return;
   }
-  commitChange((uiDocument) => {
+  const isPlaced = commitPlacement((uiDocument) => {
     const moduleId = libraryItem.kind === 'module' ? libraryItem.value : installLibraryEntry(uiDocument, getLibraryEntry(libraryItem.value));
     placeAreaModule(findEnclosingArea(uiDocument, holderId), moduleId);
   });
-  selectNode(targetArea.id);
+  if (isPlaced) selectNode(targetArea.id);
 }
 
 /**
@@ -121,14 +141,78 @@ export function saveAsModule(nodeId) {
 }
 
 /**
- * Copie un module du projet dans la bibliothèque commune.
+ * Copie un module du projet dans la bibliothèque commune (la catégorie et les tags déjà choisis restent).
  * @param {string} moduleId module
  */
 export function sendModuleToLibrary(moduleId) {
-  putLibraryEntry(buildLibraryEntry(appState.uiDocument, moduleId)).catch((error) => {
+  const entry = buildLibraryEntry(appState.uiDocument, moduleId);
+  const { category = '', tags = [] } = getLibraryEntry(entry.libraryId) ?? {};
+  putLibraryEntry({ ...entry, category, tags }).catch((error) => {
     console.error('sendModuleToLibrary', error);
     alert(`Le module est dans le projet, mais pas dans la bibliothèque : ${error.message}`);
   });
+}
+
+/**
+ * Publie un module modifié dans la bibliothèque : nouvelle version, proposée ensuite aux autres projets.
+ * @param {string} moduleId module
+ */
+export function publishModule(moduleId) {
+  const module = appState.uiDocument.modules[moduleId];
+  const entry = getLibraryEntry(module.libraryId);
+  if (entry && isModuleUpdateAvailable(module, entry)
+    && !confirm(`La bibliothèque a une autre version (v${entry.version}) de « ${module.name} ». La remplacer par celle de ce projet ?`)) return;
+  let publishedIds = [];
+  if (!commitChange((uiDocument) => { publishedIds = preparePublication(uiDocument, moduleId, getLibraryEntry); })) return;
+  publishedIds.forEach(sendModuleToLibrary);
+}
+
+/**
+ * Met à jour un module du projet depuis la bibliothèque (annulable). Les réglages des instances restent.
+ * @param {string} moduleId module
+ */
+export function updateModuleFromLibrary(moduleId) {
+  const module = appState.uiDocument.modules[moduleId];
+  const entry = getLibraryEntry(module.libraryId);
+  if (!entry) return;
+  const warningText = module.hasLocalChanges ? '\n\nAttention : les modifications faites dans ce projet seront remplacées.' : '';
+  if (!confirm(`Mettre à jour « ${module.name} » vers la v${entry.version} dans ce projet ?${warningText}`)) return;
+  let errorMessage = 'erreur interne';
+  const isUpdated = commitChange((uiDocument) => {
+    try { installLibraryEntry(uiDocument, entry, true); } catch (error) { errorMessage = error.message; throw error; }
+  });
+  if (!isUpdated) { alert(`Mise à jour impossible : ${errorMessage}.`); notifyChange(); }
+}
+
+/**
+ * Ouvre un module sur le canevas pour le modifier.
+ * @param {string} moduleId module
+ */
+export function openModuleEditor(moduleId) {
+  if (appState.editedModuleId === moduleId) return;
+  if (appState.editedModuleId) appState.parentModuleIds.push(appState.editedModuleId);
+  appState.editedModuleId = moduleId;
+  appState.armedLibraryItem = null;
+  selectNode(moduleId);
+}
+
+/** Termine l'édition du module : revient au module d'où l'on vient, sinon à l'écran. */
+export function closeModuleEditor() {
+  const { modules } = appState.uiDocument;
+  do { appState.editedModuleId = appState.parentModuleIds.pop() ?? null; } while (appState.editedModuleId && !modules[appState.editedModuleId]);
+  selectNode(appState.editedModuleId);
+}
+
+/**
+ * Change un élément interne pour une seule instance.
+ * @param {string} instanceId instance
+ * @param {object} entry élément interne (listInstanceNodes)
+ * @param {((node: object) => void)|null} mutateNode modification, null pour revenir aux valeurs du module
+ */
+export function updateInstanceNode(instanceId, entry, mutateNode) {
+  let newNode = null;
+  if (mutateNode) { newNode = cloneJson(entry.node); mutateNode(newNode); }
+  updateNode(instanceId, (instance) => setInstanceNodeValues(instance, entry, newNode));
 }
 
 /**
@@ -151,14 +235,14 @@ export function detachInstance(instanceId) {
 export function placeLibraryItem(libraryItem, holderId, insertIndex, placement) {
   if (isAreaModuleItem(libraryItem)) { placeAreaModuleItem(libraryItem, holderId); return; }
   let createdWidgetId = null;
-  commitChange((uiDocument) => {
+  const isPlaced = commitPlacement((uiDocument) => {
     const createdWidget = createWidgetFromLibraryItem(uiDocument, libraryItem);
     const holderNode = buildNodeIndex(uiDocument).get(holderId)?.node;
     if (!placement && holderNode?.widgetLayout?.mode === 'free') placement = { ...DEFAULT_FREE_PLACEMENT };
     if (placement) { createdWidget.placement = placement; replaceFillSizeForFreeDrop(createdWidget); }
     if (insertWidget(uiDocument, holderId, createdWidget, insertIndex)) createdWidgetId = createdWidget.id;
   });
-  if (createdWidgetId) selectNode(createdWidgetId);
+  if (isPlaced && createdWidgetId) selectNode(createdWidgetId);
 }
 
 /**
@@ -218,7 +302,8 @@ export function deleteSelection() {
     return;
   }
   const selectedRecord = getSelectedRecord();
-  if (!selectedRecord) return;
+  if (!selectedRecord || selectedRecord.kind === 'module') return;
+  if (selectedRecord.kind !== 'screen' && !selectedRecord.siblings) { alert('C\'est la racine : elle ne peut pas être supprimée.'); return; }
   commitChange((uiDocument) => {
     if (selectedRecord.kind === 'widget') removeWidget(uiDocument, selectedId);
     else if (selectedRecord.kind === 'area') deleteArea(uiDocument, selectedId);
@@ -232,7 +317,7 @@ export function deleteSelection() {
 /** Duplique le widget sélectionné juste après lui. */
 export function duplicateSelection() {
   const selectedRecord = getSelectedRecord();
-  if (selectedRecord?.kind !== 'widget') return;
+  if (selectedRecord?.kind !== 'widget' || !selectedRecord.siblings) return;
   let duplicateId = null;
   commitChange((uiDocument) => {
     const record = buildNodeIndex(uiDocument).get(selectedRecord.node.id);
@@ -259,14 +344,14 @@ export function splitSelectedArea(splitDirection) {
 /** Copie l'apparence (style lié + valeurs propres) de la sélection. */
 export function copySelectedAppearance() {
   const selectedRecord = getSelectedRecord();
-  if (!selectedRecord || selectedRecord.kind === 'screen') return;
+  if (!selectedRecord || selectedRecord.kind === 'screen' || selectedRecord.kind === 'module') return;
   appState.copiedAppearance = { style: selectedRecord.node.style ?? null, styleOverrides: cloneJson(selectedRecord.node.styleOverrides ?? {}) };
 }
 
 /** Colle l'apparence copiée sur la sélection. */
 export function pasteAppearanceOnSelection() {
   const copiedAppearance = appState.copiedAppearance;
-  if (!copiedAppearance || !appState.selectedId) return;
+  if (!copiedAppearance || !['area', 'widget'].includes(getSelectedRecord()?.kind)) return;
   updateNode(appState.selectedId, (node) => {
     if (copiedAppearance.style) node.style = copiedAppearance.style; else delete node.style;
     node.styleOverrides = cloneJson(copiedAppearance.styleOverrides);

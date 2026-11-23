@@ -135,8 +135,28 @@ export function createEmptyDocument() {
   return uiDocument;
 }
 
+const MODULE_SCREEN_MARGIN = 24;
+const MODULE_SCREEN_SIZES = { area: { width: 480, height: 320 }, widget: { width: 360, height: 220 } };
+
 /**
- * Construit l'index de tous les nœuds (écrans, areas, widgets) : ID → { node, kind, parent, siblings, screen }.
+ * Fabrique l'écran provisoire où un module s'édite (il n'est pas enregistré dans le projet).
+ * Un module de widgets est posé dans une area provisoire qui porte l'ID du module.
+ * @param {object} uiDocument document
+ * @param {string} moduleId module
+ * @returns {object} écran
+ */
+export function createModuleScreen(uiDocument, moduleId) {
+  const module = uiDocument.modules[moduleId];
+  const kind = module.kind === 'area' ? 'area' : 'widget';
+  const fitSize = (dimension) => (kind === 'widget' && typeof module.root.size?.[dimension] === 'number' ? module.root.size[dimension] + MODULE_SCREEN_MARGIN * 2 : 0);
+  const size = module.previewSize ?? { width: Math.max(MODULE_SCREEN_SIZES[kind].width, fitSize('width')), height: Math.max(MODULE_SCREEN_SIZES[kind].height, fitSize('height')) };
+  const root = kind === 'area' ? module.root : { id: moduleId, name: module.name,
+    widgetLayout: { mode: 'stack', direction: 'vertical', alignCross: 'start', padding: Array(4).fill(MODULE_SCREEN_MARGIN) }, widgets: [module.root] };
+  return { id: moduleId, name: module.name, platform: 'module', size, root };
+}
+
+/**
+ * Construit l'index de tous les nœuds (écrans, modules, areas, widgets) : ID → { node, kind, parent, siblings, screen }.
  * @param {object} uiDocument document
  * @returns {Map<string, object>} index
  */
@@ -146,11 +166,19 @@ export function buildNodeIndex(uiDocument) {
     nodeIndex.set(widget.id, { node: widget, kind: 'widget', parent, siblings, screen });
     for (const childWidget of widget.children ?? []) indexWidget(childWidget, widget, widget.children, screen);
   };
-  const indexArea = (area, parent, siblings, screen) => {
-    nodeIndex.set(area.id, { node: area, kind: 'area', parent, siblings, screen });
-    for (const childArea of area.children ?? []) indexArea(childArea, area, area.children, screen);
+  const indexArea = (area, parent, siblings, screen, rootOwner = screen) => {
+    nodeIndex.set(area.id, { node: area, kind: 'area', parent, siblings, screen, rootOwner });
+    for (const childArea of area.children ?? []) indexArea(childArea, area, area.children, screen, rootOwner);
     for (const widget of area.widgets ?? []) indexWidget(widget, area, area.widgets, screen);
   };
+  // Contenu des modules d'abord : en cas d'ID en double dans un fichier importé, l'écran garde la priorité.
+  for (const [moduleId, module] of Object.entries(uiDocument.modules ?? {})) {
+    if (!module.root) continue;
+    const moduleScreen = createModuleScreen(uiDocument, moduleId);
+    nodeIndex.set(moduleId, { node: module, kind: 'module', parent: null, siblings: null, screen: moduleScreen, rootOwner: module });
+    if (module.kind === 'area') indexArea(module.root, null, null, moduleScreen, module);
+    else indexWidget(module.root, moduleScreen.root, null, moduleScreen);
+  }
   for (const screen of uiDocument.screens) {
     nodeIndex.set(screen.id, { node: screen, kind: 'screen', parent: null, siblings: uiDocument.screens, screen });
     indexArea(screen.root, null, null, screen);
@@ -172,7 +200,7 @@ export function computeNodePath(nodeIndex, nodeId) {
     currentRecord = currentRecord.parent ? nodeIndex.get(currentRecord.parent.id) : null;
   }
   const screenRecord = nodeIndex.get(nodeId);
-  if (screenRecord && screenRecord.kind !== 'screen') pathIds.unshift(screenRecord.screen.id);
+  if (screenRecord && pathIds[0] !== screenRecord.screen.id) pathIds.unshift(screenRecord.screen.id);
   return pathIds.join(' > ');
 }
 
@@ -203,7 +231,7 @@ function replaceAreaInParent(record, replacementNode) {
   if (record.siblings) {
     record.siblings[record.siblings.indexOf(record.node)] = replacementNode;
   } else {
-    record.screen.root = replacementNode;
+    record.rootOwner.root = replacementNode;
   }
 }
 
@@ -309,11 +337,12 @@ export function remapIds(value, idMapping) {
  * un menu utilisé qui vise un élément copié est copié aussi.
  * @param {object} uiDocument document
  * @param {object} node widget ou area
+ * @param {string} [rootId] ID à donner à la racine de la copie (nouveau par défaut)
  * @returns {object} copie
  */
-export function cloneSubtreeWithNewIds(uiDocument, node) {
-  const idMapping = new Map();
-  for (const nodeId of collectSubtreeNodeIds(node)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
+export function cloneSubtreeWithNewIds(uiDocument, node, rootId) {
+  const idMapping = new Map(rootId ? [[node.id, rootId]] : []);
+  for (const nodeId of collectSubtreeNodeIds(node)) if (!idMapping.has(nodeId)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
   const nodeText = JSON.stringify(node);
   const copiedMenus = Object.entries(uiDocument.menus ?? {}).filter(([menuId, menu]) => {
     const menuText = JSON.stringify(menu);
@@ -321,7 +350,18 @@ export function cloneSubtreeWithNewIds(uiDocument, node) {
   });
   for (const [menuId] of copiedMenus) idMapping.set(menuId, createId(uiDocument, 'M'));
   for (const [menuId, menu] of copiedMenus) uiDocument.menus[idMapping.get(menuId)] = remapIds(menu, idMapping);
-  return remapIds(node, idMapping);
+  const copy = remapIds(node, idMapping);
+  removeModuleNodeKeys(copy);
+  return copy;
+}
+
+/**
+ * Retire les clés de suivi des modules : une copie n'est pas le même élément que l'original.
+ * @param {object} node widget ou area, modifié sur place
+ */
+function removeModuleNodeKeys(node) {
+  delete node.moduleNodeKey;
+  for (const childNode of [...(node.children ?? []), ...(node.widgets ?? [])]) removeModuleNodeKeys(childNode);
 }
 
 /**
@@ -349,7 +389,7 @@ export function insertWidget(uiDocument, holderId, widget, insertIndex) {
  */
 export function removeWidget(uiDocument, widgetId) {
   const record = buildNodeIndex(uiDocument).get(widgetId);
-  if (!record || record.kind !== 'widget') return null;
+  if (!record || record.kind !== 'widget' || !record.siblings) return null;
   record.siblings.splice(record.siblings.indexOf(record.node), 1);
   return record.node;
 }
