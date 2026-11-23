@@ -3,7 +3,7 @@
 import { SCREEN_PRESETS, WIDGET_TYPES } from './catalog.js';
 
 export const UISPEC_FORMAT = 'uimaker-noob-uispec';
-export const UISPEC_FORMAT_VERSION = '0.1';
+export const UISPEC_FORMAT_VERSION = '0.2';
 export const GENERATOR_NAME = 'UImaker_noob prototype 0.1';
 
 const ID_PATTERN = /^([A-Z])(\d+)$/;
@@ -37,11 +37,11 @@ export function recomputeIdCounters(uiDocument) {
       Object.values(value).forEach(visitValue);
     }
   };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'components', 'menus']) {
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'modules', 'menus']) {
     Object.keys(uiDocument[collectionName] ?? {}).forEach(registerId);
   }
   visitValue(uiDocument.screens);
-  visitValue(uiDocument.components);
+  visitValue(uiDocument.modules);
 }
 
 /**
@@ -124,7 +124,7 @@ export function createEmptyDocument() {
     format: UISPEC_FORMAT, formatVersion: UISPEC_FORMAT_VERSION, generator: GENERATOR_NAME,
     project: { name: 'MyApp', notes: '', defaultTheme: 'H1', idCounters: {},
       defaults: { areaSizing: { mode: 'fill' }, resizableSplitter: false } },
-    themes: {}, colorVariables: {}, styles: {}, icons: {}, components: {}, menus: {}, screens: [],
+    themes: {}, colorVariables: {}, styles: {}, icons: {}, modules: {}, menus: {}, screens: [],
   };
   const themeId = createId(uiDocument, 'H');
   uiDocument.themes[themeId] = { name: 'Default' };
@@ -263,29 +263,65 @@ export function deleteArea(uiDocument, areaId) {
  * @param {object} area area à rendre feuille
  */
 export function ensureLeafArea(area) {
-  if (!area.split) {
+  if (!area.split && !area.moduleId) {
     area.widgets ??= [];
     area.widgetLayout ??= { mode: 'free', direction: 'vertical', gap: 8, padding: [8, 8, 8, 8], alignMain: 'start', alignCross: 'stretch' };
   }
 }
 
 /**
- * Copie un widget (et ses enfants) avec de nouveaux ID.
+ * Liste les ID d'une area ou d'un widget et de tout son contenu.
+ * @param {object} node area ou widget
+ * @returns {string[]} ID
+ */
+export function collectSubtreeNodeIds(node) {
+  return [node.id, ...[...(node.children ?? []), ...(node.widgets ?? [])].flatMap(collectSubtreeNodeIds)];
+}
+
+const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId']);
+const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor']);
+
+/**
+ * Copie une valeur en remplaçant les ID et toutes les références vers ces ID (liens internes compris).
+ * @param {any} value valeur
+ * @param {Map<string, string>} idMapping ancien ID → nouvel ID
+ * @returns {any} copie
+ */
+export function remapIds(value, idMapping) {
+  if (Array.isArray(value)) return value.map((item) => remapIds(item, idMapping));
+  if (!value || typeof value !== 'object') return value;
+  const getNewId = (oldId) => idMapping.get(oldId) ?? oldId;
+  return Object.fromEntries(Object.entries(value).map(([key, childValue]) => {
+    if (typeof childValue === 'string') {
+      if (REFERENCE_KEYS.has(key)) return [key, getNewId(childValue)];
+      if (COLOR_REFERENCE_KEYS.has(key) && childValue.startsWith('$')) return [key, `$${getNewId(childValue.slice(1))}`];
+      return [key, childValue];
+    }
+    if (key === 'overrides' && childValue) {
+      return [key, Object.fromEntries(Object.entries(childValue).map(([nodeId, nodeOverride]) => [getNewId(nodeId), remapIds(nodeOverride, idMapping)]))];
+    }
+    return [key, remapIds(childValue, idMapping)];
+  }));
+}
+
+/**
+ * Copie un widget ou une area avec de nouveaux ID. Les liens internes (pile de pages, actions) suivent la copie ;
+ * un menu utilisé qui vise un élément copié est copié aussi.
  * @param {object} uiDocument document
- * @param {object} widget widget source
- * @param {Map<string, string>} [idMapping] reçoit ancien ID → nouvel ID
+ * @param {object} node widget ou area
  * @returns {object} copie
  */
-export function cloneWidgetWithNewIds(uiDocument, widget, idMapping = new Map()) {
-  const widgetCopy = cloneJson(widget);
-  const assignNewIds = (currentWidget) => {
-    const newId = createId(uiDocument, 'W');
-    idMapping.set(currentWidget.id, newId);
-    currentWidget.id = newId;
-    for (const childWidget of currentWidget.children ?? []) assignNewIds(childWidget);
-  };
-  assignNewIds(widgetCopy);
-  return widgetCopy;
+export function cloneSubtreeWithNewIds(uiDocument, node) {
+  const idMapping = new Map();
+  for (const nodeId of collectSubtreeNodeIds(node)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
+  const nodeText = JSON.stringify(node);
+  const copiedMenus = Object.entries(uiDocument.menus ?? {}).filter(([menuId, menu]) => {
+    const menuText = JSON.stringify(menu);
+    return nodeText.includes(`"menuId":"${menuId}"`) && [...idMapping.keys()].some((nodeId) => menuText.includes(`"target":"${nodeId}"`));
+  });
+  for (const [menuId] of copiedMenus) idMapping.set(menuId, createId(uiDocument, 'M'));
+  for (const [menuId, menu] of copiedMenus) uiDocument.menus[idMapping.get(menuId)] = remapIds(menu, idMapping);
+  return remapIds(node, idMapping);
 }
 
 /**
@@ -331,52 +367,6 @@ export function containsNode(ancestorNode, descendantId) {
 }
 
 /**
- * Enregistre un widget comme widget perso (modèle réutilisable) dans la bibliothèque.
- * @param {object} uiDocument document
- * @param {object} widget widget source
- * @returns {string} ID du widget perso (C…)
- */
-export function saveWidgetAsComponent(uiDocument, widget) {
-  const componentId = createId(uiDocument, 'C');
-  const componentRoot = cloneWidgetWithNewIds(uiDocument, widget);
-  delete componentRoot.placement;
-  uiDocument.components[componentId] = { name: widget.name || 'CustomWidget', notes: '', root: componentRoot };
-  return componentId;
-}
-
-/**
- * Crée une instance d'un widget perso.
- * @param {object} uiDocument document
- * @param {string} componentId ID du widget perso
- * @returns {object} widget de type componentInstance
- */
-export function createComponentInstance(uiDocument, componentId) {
-  const component = uiDocument.components[componentId];
-  return { id: createId(uiDocument, 'W'), name: component.name, type: 'componentInstance', componentId,
-    overrides: {}, size: cloneJson(component.root.size ?? { width: 'hug', height: 'hug' }), notes: '' };
-}
-
-/**
- * Détache une instance : la remplace par une copie modifiable du modèle.
- * @param {object} uiDocument document
- * @param {string} instanceId ID de l'instance
- * @returns {string|null} ID du widget créé
- */
-export function detachComponentInstance(uiDocument, instanceId) {
-  const record = buildNodeIndex(uiDocument).get(instanceId);
-  const instance = record?.node;
-  const component = instance ? uiDocument.components[instance.componentId] : null;
-  if (!component) return null;
-  const idMapping = new Map();
-  const detachedWidget = cloneWidgetWithNewIds(uiDocument, component.root, idMapping);
-  detachedWidget.name = instance.name;
-  detachedWidget.size = cloneJson(instance.size);
-  if (instance.placement) detachedWidget.placement = cloneJson(instance.placement);
-  record.siblings[record.siblings.indexOf(instance)] = detachedWidget;
-  return detachedWidget.id;
-}
-
-/**
  * Supprime un style et retire ses références.
  * @param {object} uiDocument document
  * @param {string} styleId style à supprimer
@@ -401,6 +391,34 @@ export function countStyleUsers(uiDocument, styleId) {
 }
 
 /**
+ * Convertit les anciens « widgets perso » (components) en modules. Leurs ID ne changent pas.
+ * @param {object} uiDocument document importé
+ */
+function migrateComponentsToModules(uiDocument) {
+  uiDocument.modules ??= {};
+  for (const [componentId, component] of Object.entries(uiDocument.components ?? {})) {
+    uiDocument.modules[componentId] ??= { ...component, kind: 'widget', libraryId: crypto.randomUUID(), version: 1 };
+  }
+  delete uiDocument.components;
+  for (const module of Object.values(uiDocument.modules)) {
+    module.kind ??= module.root?.type ? 'widget' : 'area';
+    module.libraryId ??= crypto.randomUUID();
+    module.version ??= 1;
+  }
+  const visitValue = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (value.type === 'componentInstance') {
+      value.type = 'moduleInstance';
+      value.moduleId = value.componentId;
+      delete value.componentId;
+    }
+    Object.values(value).forEach(visitValue);
+  };
+  visitValue(uiDocument.screens);
+  visitValue(uiDocument.modules);
+}
+
+/**
  * Vérifie et complète un document importé.
  * @param {any} importedValue contenu JSON lu
  * @returns {object} document prêt à l'emploi
@@ -410,9 +428,11 @@ export function normalizeImportedDocument(importedValue) {
   if (!importedValue || importedValue.format !== UISPEC_FORMAT) throw new Error(`Champ "format" attendu : "${UISPEC_FORMAT}"`);
   if (!Array.isArray(importedValue.screens) || importedValue.screens.length === 0) throw new Error('Aucun écran ("screens") dans le fichier');
   const uiDocument = cloneJson(importedValue);
+  uiDocument.formatVersion = UISPEC_FORMAT_VERSION;
   uiDocument.project ??= { name: 'ImportedApp' };
   uiDocument.project.defaults ??= { areaSizing: { mode: 'fill' }, resizableSplitter: false };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'components', 'menus']) uiDocument[collectionName] ??= {};
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'menus']) uiDocument[collectionName] ??= {};
+  migrateComponentsToModules(uiDocument);
   if (Object.keys(uiDocument.themes).length === 0) uiDocument.themes.H1 = { name: 'Default' };
   if (!uiDocument.themes[uiDocument.project.defaultTheme]) uiDocument.project.defaultTheme = Object.keys(uiDocument.themes)[0];
   for (const record of buildNodeIndex(uiDocument).values()) {

@@ -2,7 +2,7 @@
 import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
-import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createPage, detachComponentInstance, saveWidgetAsComponent } from '../model/document.js';
+import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createPage } from '../model/document.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
   createButtonRow, createCheckboxField, createColorField, createInfoRow, createNumberField, createPanelSection,
@@ -10,7 +10,7 @@ import {
 } from './fields.js';
 import { createActionEditor, createEventsSection } from './actionEditor.js';
 import {
-  copySelectedAppearance, deleteSelection, duplicateSelection, pasteAppearanceOnSelection, splitSelectedArea, updateNode,
+  copySelectedAppearance, deleteSelection, detachInstance, duplicateSelection, pasteAppearanceOnSelection, saveAsModule, splitSelectedArea, updateNode,
 } from './editorActions.js';
 
 const LEFT_SECTIONS = [{ value: 'properties', label: 'Paramètres' }, { value: 'tree', label: 'Arbre' }, { value: 'settings', label: 'Réglages de l\x27app' }];
@@ -174,6 +174,10 @@ function createAreaProperties(area, record) {
       { label: 'Diviser ⇅', title: 'Découper en deux, l\'une sous l\'autre', onClick: () => splitSelectedArea('vertical') },
       record.parent ? { label: 'Supprimer', isDanger: true, onClick: deleteSelection } : null,
     ].filter(Boolean)),
+    area.moduleId ? createInfoRow('Module', `${area.moduleId} · ${appState.uiDocument.modules[area.moduleId]?.name ?? 'introuvable'}`) : null,
+    createButtonRow([area.moduleId
+      ? { label: 'Détacher', title: 'Remplace l\'instance par une copie modifiable', onClick: () => detachInstance(area.id) }
+      : { label: '→ Module', title: 'Enregistre cette area et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(area.id) }]),
     area.split ? createInfoRow('Découpage', area.split === 'horizontal' ? 'côte à côte' : 'empilé') : null,
   ])];
   if (record.parent) {
@@ -187,8 +191,8 @@ function createAreaProperties(area, record) {
         (isResizable) => updateNode(area.id, (targetArea) => { targetArea.resizableSplitter = isResizable; })),
     ]));
   }
-  if (!area.split) sections.push(createWidgetLayoutSection(area));
-  sections.push(createNodeAppearanceSection(area, 'area'));
+  if (!area.split && !area.moduleId) sections.push(createWidgetLayoutSection(area));
+  if (!area.moduleId) sections.push(createNodeAppearanceSection(area, 'area'));
   sections.push(createEventsSection(area, false, (mutateNode) => updateNode(area.id, mutateNode)));
   sections.push(createPanelSection('Notes', [createNotesField(area)], false));
   return sections;
@@ -326,16 +330,16 @@ function createWidgetProperties(widget, record) {
   const parentLayout = record.parent.widgetLayout ?? { mode: 'stack' };
   const updateSize = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.size ??= {}; setOrDeleteValue(targetWidget.size, key, value); });
   const updatePlacement = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.placement ??= { anchor: 'topLeft', x: 0, y: 0 }; setOrDeleteValue(targetWidget.placement, key, value); });
-  const typeLabel = widget.type === 'componentInstance'
-    ? `Widget perso ${widget.componentId} · ${appState.uiDocument.components[widget.componentId]?.name ?? '?'}`
+  const typeLabel = widget.type === 'moduleInstance'
+    ? `Module ${widget.moduleId} · ${appState.uiDocument.modules[widget.moduleId]?.name ?? '?'}`
     : typeDefinition?.label ?? widget.type;
   const sections = [createPanelSection(typeLabel, [
     ...createIdentityFields(widget),
     createButtonRow([
       { label: 'Dupliquer', onClick: duplicateSelection },
-      widget.type === 'componentInstance'
+      widget.type === 'moduleInstance'
         ? { label: 'Détacher', title: 'Remplace l\'instance par une copie modifiable', onClick: () => detachInstance(widget.id) }
-        : { label: '→ Widget perso', title: 'Enregistre ce widget dans la bibliothèque (fenêtre de droite)', onClick: () => saveAsComponent(widget.id) },
+        : { label: '→ Module', title: 'Enregistre ce widget et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(widget.id) },
       { label: 'Supprimer', isDanger: true, onClick: deleteSelection },
     ]),
   ])];
@@ -376,7 +380,7 @@ function createWidgetProperties(widget, record) {
     createActionEditor(widget.action, (newAction) => updateNode(widget.id, (targetWidget) => { targetWidget.action = newAction; })),
   ], false));
   sections.push(createEventsSection(widget, false, (mutateNode) => updateNode(widget.id, mutateNode)));
-  if (widget.type !== 'componentInstance') sections.push(createNodeAppearanceSection(widget, widget.type));
+  if (widget.type !== 'moduleInstance') sections.push(createNodeAppearanceSection(widget, widget.type));
   sections.push(createPanelSection('Notes', [createNotesField(widget)], false));
   return sections;
 }
@@ -391,26 +395,6 @@ function addPageToStack(pageStackId) {
     pageStack.children.push(createPage(uiDocument, `Page${pageStack.children.length + 1}`));
     pageStack.content = { ...pageStack.content, activeIndex: pageStack.children.length - 1 };
   });
-}
-
-/**
- * Enregistre un widget comme widget perso.
- * @param {string} widgetId widget
- */
-function saveAsComponent(widgetId) {
-  commitChange((uiDocument) => saveWidgetAsComponent(uiDocument, buildNodeIndex(uiDocument).get(widgetId).node));
-  appState.rightPanelSection = 'widgets';
-  notifyChange();
-}
-
-/**
- * Détache une instance de widget perso.
- * @param {string} instanceId instance
- */
-function detachInstance(instanceId) {
-  let detachedId = null;
-  commitChange((uiDocument) => { detachedId = detachComponentInstance(uiDocument, instanceId); });
-  if (detachedId) selectNode(detachedId);
 }
 
 /**
@@ -445,11 +429,11 @@ function createTreeView() {
   }, [createElement('code', { text: node.id }), createElement('span', { text: ` ${node.name ?? ''}` }), createElement('span', { className: 'tree-kind', text: kindLabel })]);
   const rows = [];
   const visitWidget = (widget, depth) => {
-    rows.push(createTreeRow(widget, depth, widget.type === 'componentInstance' ? `perso ${widget.componentId}` : WIDGET_TYPES[widget.type]?.label ?? widget.type));
+    rows.push(createTreeRow(widget, depth, widget.type === 'moduleInstance' ? `module ${widget.moduleId}` : WIDGET_TYPES[widget.type]?.label ?? widget.type));
     for (const childWidget of widget.children ?? []) visitWidget(childWidget, depth + 1);
   };
   const visitArea = (area, depth) => {
-    rows.push(createTreeRow(area, depth, area.split ? (area.split === 'horizontal' ? 'area ⇆' : 'area ⇅') : 'area'));
+    rows.push(createTreeRow(area, depth, area.moduleId ? `module ${area.moduleId}` : area.split ? (area.split === 'horizontal' ? 'area ⇆' : 'area ⇅') : 'area'));
     for (const childArea of area.children ?? []) visitArea(childArea, depth + 1);
     for (const widget of area.widgets ?? []) visitWidget(widget, depth + 1);
   };

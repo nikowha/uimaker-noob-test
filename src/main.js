@@ -4,6 +4,7 @@ import { createTopBar, renderTopBar } from './ui/topBar.js';
 import { createLeftPanel, renderLeftPanel } from './ui/leftPanel.js';
 import { createRightPanel, renderRightPanel } from './ui/rightPanel.js';
 import { createCanvasView, renderCanvasView } from './ui/canvasView.js';
+import { loadModuleLibrary } from './io/moduleLibrary.js';
 import { deleteSelection, duplicateSelection } from './ui/editorActions.js';
 
 /**
@@ -46,6 +47,7 @@ function startApplication() {
   subscribeToChanges(renderAll);
   window.addEventListener('keydown', handleKeyDown);
   renderAll();
+  loadModuleLibrary().catch((error) => console.error('loadModuleLibrary', error));
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./service-worker.js').catch((error) => console.error('startApplication (service worker)', error));
   }

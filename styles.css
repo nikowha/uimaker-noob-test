@@ -335,3 +335,12 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .test-toolbar > * { flex: none; }
 .test-toolbar button { white-space: nowrap; }
 .test-toolbar select { max-width: 190px; }
+
+/* ---- Modules ---- */
+.module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+.module-card { min-width: 0; }
+.module-card:has(.module-details[open]) { grid-column: 1 / -1; }
+.module-preview { position: relative; overflow: hidden; pointer-events: none; border-radius: 3px; text-align: left; }
+.module-preview > .ui-screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-shadow: none; }
+.module-details > summary { font-size: 11px; color: var(--editor-text-muted); padding: 6px 2px; cursor: pointer; }
+.panel-section > input[type="text"] { width: 100%; }

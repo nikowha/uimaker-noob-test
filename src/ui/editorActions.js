@@ -1,9 +1,11 @@
 // Actions de l'éditeur partagées par le canevas, les panneaux et le clavier (PROTOTYPE).
 import { appState, commitChange, selectNode } from '../model/store.js';
 import {
-  buildNodeIndex, cloneJson, cloneWidgetWithNewIds, createComponentInstance, createWidget, deleteArea, deleteStyle,
+  buildNodeIndex, cloneJson, cloneSubtreeWithNewIds, createWidget, deleteArea, deleteStyle,
   insertWidget, isWidgetHolder, removeWidget, splitArea,
 } from '../model/document.js';
+import { buildLibraryEntry, createModuleInstance, detachModuleInstance, installLibraryEntry, placeAreaModule, saveNodeAsModule } from '../model/modules.js';
+import { getLibraryEntry, putLibraryEntry } from '../io/moduleLibrary.js';
 
 const ICON_TARGET_TYPES = new Set(['button', 'icon']);
 const FREE_DROP_DEFAULT_SIZE = { width: 240, height: 160 };
@@ -49,11 +51,12 @@ export function findDefaultHolderId() {
 /**
  * Crée le widget correspondant à un élément de bibliothèque.
  * @param {object} uiDocument document
- * @param {{kind: string, value: string}} libraryItem widget du catalogue, widget perso ou icône
+ * @param {{kind: string, value: string}} libraryItem widget du catalogue, module ou icône
  * @returns {object} widget
  */
 function createWidgetFromLibraryItem(uiDocument, libraryItem) {
-  if (libraryItem.kind === 'component') return createComponentInstance(uiDocument, libraryItem.value);
+  if (libraryItem.kind === 'module') return createModuleInstance(uiDocument, libraryItem.value);
+  if (libraryItem.kind === 'libraryModule') return createModuleInstance(uiDocument, installLibraryEntry(uiDocument, getLibraryEntry(libraryItem.value)));
   if (libraryItem.kind === 'icon') {
     const iconWidget = createWidget(uiDocument, 'icon');
     iconWidget.content.icon = `lucide:${libraryItem.value}`;
@@ -64,6 +67,81 @@ function createWidgetFromLibraryItem(uiDocument, libraryItem) {
 }
 
 /**
+ * Indique si un élément de bibliothèque est un module d'area.
+ * @param {{kind: string, value: string}} libraryItem élément
+ * @returns {boolean} vrai pour un module d'area
+ */
+function isAreaModuleItem(libraryItem) {
+  if (libraryItem.kind === 'module') return appState.uiDocument.modules[libraryItem.value]?.kind === 'area';
+  return libraryItem.kind === 'libraryModule' && getLibraryEntry(libraryItem.value)?.kind === 'area';
+}
+
+/**
+ * Trouve l'area qui contient un élément.
+ * @param {object} uiDocument document
+ * @param {string} nodeId area ou widget
+ * @returns {object|undefined} area
+ */
+function findEnclosingArea(uiDocument, nodeId) {
+  const nodeIndex = buildNodeIndex(uiDocument);
+  let record = nodeIndex.get(nodeId);
+  while (record?.kind === 'widget') record = nodeIndex.get(record.parent.id);
+  return record?.node;
+}
+
+/**
+ * Pose un module d'area dans une area vide.
+ * @param {{kind: string, value: string}} libraryItem module
+ * @param {string} holderId area (ou conteneur dans l'area)
+ */
+function placeAreaModuleItem(libraryItem, holderId) {
+  const targetArea = findEnclosingArea(appState.uiDocument, holderId);
+  if (!targetArea) return;
+  if (targetArea.split || targetArea.moduleId || (targetArea.widgets ?? []).length > 0) {
+    alert(`« ${targetArea.name} » n'est pas vide. Un module d'area se pose dans une area vide : divise d'abord cette area.`);
+    return;
+  }
+  commitChange((uiDocument) => {
+    const moduleId = libraryItem.kind === 'module' ? libraryItem.value : installLibraryEntry(uiDocument, getLibraryEntry(libraryItem.value));
+    placeAreaModule(findEnclosingArea(uiDocument, holderId), moduleId);
+  });
+  selectNode(targetArea.id);
+}
+
+/**
+ * Enregistre un widget ou une area comme module, dans le projet et dans la bibliothèque commune.
+ * @param {string} nodeId élément
+ */
+export function saveAsModule(nodeId) {
+  let moduleId = null;
+  commitChange((uiDocument) => { moduleId = saveNodeAsModule(uiDocument, buildNodeIndex(uiDocument).get(nodeId).node); });
+  appState.rightPanelSection = 'modules';
+  selectNode(nodeId);
+  if (moduleId) sendModuleToLibrary(moduleId);
+}
+
+/**
+ * Copie un module du projet dans la bibliothèque commune.
+ * @param {string} moduleId module
+ */
+export function sendModuleToLibrary(moduleId) {
+  putLibraryEntry(buildLibraryEntry(appState.uiDocument, moduleId)).catch((error) => {
+    console.error('sendModuleToLibrary', error);
+    alert(`Le module est dans le projet, mais pas dans la bibliothèque : ${error.message}`);
+  });
+}
+
+/**
+ * Détache une instance de module (widget ou area).
+ * @param {string} instanceId instance
+ */
+export function detachInstance(instanceId) {
+  let detachedId = null;
+  commitChange((uiDocument) => { detachedId = detachModuleInstance(uiDocument, instanceId); });
+  if (detachedId) selectNode(detachedId);
+}
+
+/**
  * Ajoute un élément de bibliothèque dans une area / un conteneur et le sélectionne.
  * @param {{kind: string, value: string}} libraryItem élément de bibliothèque
  * @param {string} holderId cible
@@ -71,6 +149,7 @@ function createWidgetFromLibraryItem(uiDocument, libraryItem) {
  * @param {object} [placement] placement en mode libre
  */
 export function placeLibraryItem(libraryItem, holderId, insertIndex, placement) {
+  if (isAreaModuleItem(libraryItem)) { placeAreaModuleItem(libraryItem, holderId); return; }
   let createdWidgetId = null;
   commitChange((uiDocument) => {
     const createdWidget = createWidgetFromLibraryItem(uiDocument, libraryItem);
@@ -157,7 +236,7 @@ export function duplicateSelection() {
   let duplicateId = null;
   commitChange((uiDocument) => {
     const record = buildNodeIndex(uiDocument).get(selectedRecord.node.id);
-    const duplicate = cloneWidgetWithNewIds(uiDocument, record.node);
+    const duplicate = cloneSubtreeWithNewIds(uiDocument, record.node);
     if (duplicate.placement) duplicate.placement = { ...duplicate.placement, x: (duplicate.placement.x ?? 0) + 16, y: (duplicate.placement.y ?? 0) + 16 };
     record.siblings.splice(record.siblings.indexOf(record.node) + 1, 0, duplicate);
     duplicateId = duplicate.id;

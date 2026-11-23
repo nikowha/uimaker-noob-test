@@ -1,6 +1,6 @@
 // Rendu d'un écran : areas découpées, placement des widgets, apparence, thème (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
-import { cloneJson } from '../model/document.js';
+import { applyModuleOverrides } from '../model/modules.js';
 import { applyAppearanceToElement, applyThemeVariables, resolveAppearance } from './styleResolver.js';
 import { fillWidgetContent } from './widgetRenderer.js';
 
@@ -133,23 +133,6 @@ function applyFreePlacement(element, widget) {
 }
 
 /**
- * Applique les remplacements d'une instance au modèle d'un widget perso.
- * @param {object} componentRoot racine du modèle
- * @param {object} overrides { idInterne: { content: {...} } }
- * @returns {object} copie modifiée
- */
-function applyComponentOverrides(componentRoot, overrides) {
-  const rootCopy = cloneJson(componentRoot);
-  const visitWidget = (widget) => {
-    const widgetOverride = overrides?.[widget.id];
-    if (widgetOverride?.content) widget.content = { ...widget.content, ...widgetOverride.content };
-    for (const childWidget of widget.children ?? []) visitWidget(childWidget);
-  };
-  visitWidget(rootCopy);
-  return rootCopy;
-}
-
-/**
  * Crée un rendu d'écran.
  * @param {object} uiDocument document
  * @param {object} screen écran
@@ -163,7 +146,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
    * Ajoute le badge d'ID et l'état sélectionné à un élément de l'éditeur.
    * @param {HTMLElement} element élément
    * @param {object} node nœud
-   * @param {boolean} isInsideInstance vrai dans une instance de widget perso (pas d'ID propre)
+   * @param {boolean} isInsideInstance vrai dans une instance de module (pas d'ID propre)
    */
   const decorateEditorElement = (element, node, isInsideInstance) => {
     if (isInsideInstance) return;
@@ -181,18 +164,18 @@ export function renderScreen(uiDocument, screen, renderOptions) {
    * @param {boolean} isInsideInstance vrai dans une instance
    * @returns {HTMLElement} élément
    */
-  const renderWidget = (widget, parentLayout, isInsideInstance) => {
+  const renderWidget = (widget, parentLayout, isInsideInstance, parentModuleIds = []) => {
     const widgetElement = createElement('div', { className: 'ui-widget' });
     let renderedWidget = widget;
-    if (widget.type === 'componentInstance') {
-      const component = uiDocument.components[widget.componentId];
-      if (!component) {
-        renderedWidget = { ...widget, type: 'placeholder', content: { description: `Widget perso ${widget.componentId} introuvable` } };
+    if (widget.type === 'moduleInstance') {
+      const module = uiDocument.modules[widget.moduleId];
+      if (!module || parentModuleIds.includes(widget.moduleId)) {
+        renderedWidget = { ...widget, type: 'placeholder', content: { description: `Module ${widget.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } };
       } else {
-        const instanceRoot = applyComponentOverrides(component.root, widget.overrides);
+        const instanceRoot = applyModuleOverrides(module.root, widget.overrides);
         instanceRoot.size = widget.size ?? instanceRoot.size;
         instanceRoot.placement = widget.placement;
-        const instanceElement = renderWidget(instanceRoot, parentLayout, true);
+        const instanceElement = renderWidget(instanceRoot, parentLayout, true, [...parentModuleIds, widget.moduleId]);
         instanceElement.classList.add('ui-component-instance');
         decorateEditorElement(instanceElement, widget, isInsideInstance);
         return instanceElement;
@@ -206,7 +189,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       const isPageStack = renderedWidget.type === 'pageStack';
       const activePageIndex = Math.max(0, Math.min(renderedWidget.content?.activeIndex ?? 0, renderedWidget.children.length - 1));
       renderedWidget.children.forEach((childWidget, childIndex) => {
-        const childElement = renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance);
+        const childElement = renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance, parentModuleIds);
         if (isPageStack && childIndex !== activePageIndex) childElement.style.display = 'none';
         widgetElement.append(childElement);
       });
@@ -231,7 +214,18 @@ export function renderScreen(uiDocument, screen, renderOptions) {
    * @param {string|null} parentSplit sens du découpage du parent
    * @returns {HTMLElement} élément
    */
-  const renderArea = (area, parentSplit) => {
+  const renderArea = (area, parentSplit, isInsideInstance = false, parentModuleIds = []) => {
+    if (area.moduleId) {
+      const module = uiDocument.modules[area.moduleId];
+      const isUsable = module && !parentModuleIds.includes(area.moduleId);
+      const instanceRoot = isUsable ? applyModuleOverrides(module.root, area.overrides) : { widgetLayout: { mode: 'free' },
+        widgets: [{ id: '', name: area.name, type: 'placeholder', placement: { anchor: 'stretch', x: 0, y: 0 },
+          content: { description: `Module ${area.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } }] };
+      const instanceElement = renderArea({ ...instanceRoot, sizing: area.sizing, resizableSplitter: area.resizableSplitter }, parentSplit, true, [...parentModuleIds, area.moduleId]);
+      instanceElement.classList.add('ui-component-instance');
+      decorateEditorElement(instanceElement, area, isInsideInstance);
+      return instanceElement;
+    }
     const areaElement = createElement('div', { className: 'ui-area' });
     applyAreaSizing(areaElement, area.sizing ?? uiDocument.project.defaults?.areaSizing ?? { mode: 'fill' }, parentSplit);
     applyAppearanceToElement(areaElement, resolveAppearance(uiDocument, area), uiDocument, themeId, false);
@@ -240,7 +234,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       areaElement.style.display = 'flex';
       areaElement.style.flexDirection = area.split === 'horizontal' ? 'row' : 'column';
       area.children.forEach((childArea, childIndex) => {
-        if (childIndex > 0) {
+        if (childIndex > 0 && !(isEditor && isInsideInstance)) {
           const previousArea = area.children[childIndex - 1];
           const isResizable = previousArea.resizableSplitter ?? uiDocument.project.defaults?.resizableSplitter ?? false;
           areaElement.append(createElement('div', {
@@ -248,14 +242,14 @@ export function renderScreen(uiDocument, screen, renderOptions) {
             dataset: { splitParentId: area.id, previousIndex: String(childIndex - 1) },
           }));
         }
-        areaElement.append(renderArea(childArea, area.split));
+        areaElement.append(renderArea(childArea, area.split, isInsideInstance, parentModuleIds));
       });
     } else {
       areaElement.classList.add('is-leaf');
       applyWidgetLayout(areaElement, area.widgetLayout);
-      for (const widget of area.widgets ?? []) areaElement.append(renderWidget(widget, area.widgetLayout, false));
+      for (const widget of area.widgets ?? []) areaElement.append(renderWidget(widget, area.widgetLayout, isInsideInstance, parentModuleIds));
     }
-    decorateEditorElement(areaElement, area, false);
+    decorateEditorElement(areaElement, area, isInsideInstance);
     return areaElement;
   };
 

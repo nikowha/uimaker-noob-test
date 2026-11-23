@@ -8,11 +8,12 @@ import { getIconSvg, isIconLibraryLoaded, loadIconLibrary, searchIcons } from '.
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
 import { startLibraryDrag } from './canvasView.js';
 import { applyIconFromLibrary, findDefaultHolderId } from './editorActions.js';
+import { createModulesView } from './modulesView.js';
 import { createActionEditor } from './actionEditor.js';
 import { convertMenuItemsToText, flattenMenuItems, parseMenuText } from '../model/interactions.js';
 
 const RIGHT_SECTIONS = [
-  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
+  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'modules', label: 'Modules' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
   { value: 'styles', label: 'Styles partagés' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
@@ -25,7 +26,7 @@ let iconSearchText = '';
 /**
  * Tuile de bibliothèque : glisser vers le canevas, ou toucher puis toucher l'area cible.
  * @param {{kind: string, value: string, label: string}} libraryItem élément
- * @param {string} iconMarkup SVG de la tuile
+ * @param {string|HTMLElement} iconMarkup SVG ou aperçu de la tuile
  * @param {string} [subtitle] petit texte sous le nom
  * @returns {HTMLElement} tuile
  */
@@ -35,7 +36,7 @@ function createLibraryTile(libraryItem, iconMarkup, subtitle) {
     className: `library-tile${isArmed ? ' is-armed' : ''}`,
     attributes: { title: `${libraryItem.label} — glisser dans une area, ou toucher puis toucher l'area` },
     on: { pointerdown: (pointerEvent) => { pointerEvent.preventDefault(); startLibraryDrag(libraryItem, pointerEvent); } },
-  }, [createElement('span', { className: 'library-tile-icon', html: iconMarkup }), createElement('span', { className: 'library-tile-label', text: libraryItem.label }),
+  }, [iconMarkup instanceof Element ? iconMarkup : createElement('span', { className: 'library-tile-icon', html: iconMarkup }), createElement('span', { className: 'library-tile-label', text: libraryItem.label }),
     subtitle ? createElement('span', { className: 'library-tile-subtitle', text: subtitle }) : null]);
 }
 
@@ -43,25 +44,7 @@ function createLibraryTile(libraryItem, iconMarkup, subtitle) {
 function createWidgetLibrary() {
   const catalogTiles = Object.entries(WIDGET_TYPES).map(([widgetType, typeDefinition]) =>
     createLibraryTile({ kind: 'widget', value: widgetType, label: typeDefinition.label }, getIconSvg(`lucide:${typeDefinition.libraryIcon}`)));
-  const componentEntries = Object.entries(appState.uiDocument.components);
-  const componentTiles = componentEntries.map(([componentId, component]) => {
-    const tile = createLibraryTile({ kind: 'component', value: componentId, label: component.name }, getIconSvg('lucide:component'), componentId);
-    return tile;
-  });
-  const componentManagement = componentEntries.map(([componentId, component]) => createElement('div', { className: 'list-row' }, [
-    createElement('code', { text: componentId }),
-    createElement('input', { attributes: { type: 'text', value: component.name }, on: { change: (changeEvent) => commitChange((uiDocument) => {
-      uiDocument.components[componentId].name = changeEvent.target.value.trim() || component.name;
-    }) } }),
-    createElement('button', { className: 'is-danger', text: '✕', attributes: { type: 'button', title: 'Supprimer ce widget perso (les instances deviennent des placeholders)' },
-      on: { click: () => commitChange((uiDocument) => { delete uiDocument.components[componentId]; }) } }),
-  ]));
-  return [
-    createPanelSection('Widgets de base', [createElement('div', { className: 'library-grid' }, catalogTiles)]),
-    createPanelSection('Widgets perso', componentTiles.length
-      ? [createElement('div', { className: 'library-grid' }, componentTiles), ...componentManagement]
-      : [createElement('div', { className: 'panel-hint', text: 'Aucun pour l\'instant. Sélectionne un widget (ou un conteneur rempli) puis « → Widget perso » à gauche.' })]),
-  ];
+  return [createPanelSection('Widgets de base', [createElement('div', { className: 'library-grid' }, catalogTiles)])];
 }
 
 /**
@@ -266,7 +249,7 @@ export function renderRightPanel() {
   const isSearchFocused = activeElement?.type === 'search' && panelBodyElement.contains(activeElement);
   if (isSearchFocused) return;
   const scrollPosition = panelBodyElement.scrollTop;
-  const sectionBuilders = { widgets: createWidgetLibrary, templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
+  const sectionBuilders = { widgets: createWidgetLibrary, modules: () => createModulesView(createLibraryTile), templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
   panelBodyElement.replaceChildren(...(sectionBuilders[appState.rightPanelSection] ?? createWidgetLibrary)());
   panelBodyElement.scrollTop = scrollPosition;
 }

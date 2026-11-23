@@ -65,7 +65,7 @@ export const appState = {
   selectedId: null,          // ID d'un écran, area, widget, ou style (T…)
   currentScreenId: null,
   currentThemeId: null,
-  armedLibraryItem: null,    // { kind: 'widget'|'component'|'icon', value } en attente d'un tap sur le canevas
+  armedLibraryItem: null,    // { kind: 'widget'|'module'|'libraryModule'|'icon', value } en attente d'un tap sur le canevas
   isScrubbing: false,        // vrai pendant qu'on change une valeur en glissant (la fenêtre de gauche ne se redessine pas)
   areIdsVisible: true,
   copiedAppearance: null,
@@ -139,7 +139,10 @@ export function stepHistory(direction) {
   const targetStack = direction < 0 ? redoStack : undoStack;
   if (sourceStack.length === 0) return;
   targetStack.push(JSON.stringify(appState.uiDocument));
+  const usedCounters = appState.uiDocument.project.idCounters ?? {};
   appState.uiDocument = JSON.parse(sourceStack.pop());
+  const restoredCounters = appState.uiDocument.project.idCounters ??= {};
+  for (const [prefix, count] of Object.entries(usedCounters)) restoredCounters[prefix] = Math.max(restoredCounters[prefix] ?? 0, count);
   repairViewState();
   saveDocumentLocally();
   notifyChange();
