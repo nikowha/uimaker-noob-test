@@ -4,7 +4,7 @@ import { buildNodeIndex, cloneJson, cloneSubtreeWithNewIds, collectSubtreeNodeId
 
 export const MODULE_LIBRARY_FORMAT = 'uimaker-noob-modules';
 export const MODULE_LIBRARY_FORMAT_VERSION = '0.1';
-const COLOR_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor']);
+const COLOR_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor', 'alternateColor']);
 
 /**
  * Enregistre un widget ou une area (avec son contenu) comme module du projet. L'original ne change pas.
@@ -202,6 +202,37 @@ export function detachModuleInstance(uiDocument, instanceId) {
   return instanceId;
 }
 
+const REPEAT_DRAW_LIMIT = 64;
+
+/**
+ * Contenu dessiné d'une répétition : un conteneur avec le nombre d'exemple d'instances du module répété.
+ * @param {object} uiDocument document
+ * @param {object} repeatWidget widget de type repeat
+ * @param {(itemIndex: number) => string} createItemId donne l'ID de chaque élément
+ * @returns {object|null} conteneur, null si le module n'existe pas ou n'est pas un module de widgets
+ */
+export function buildRepeatContainer(uiDocument, repeatWidget, createItemId) {
+  const content = repeatWidget.content ?? {};
+  const module = uiDocument.modules[content.itemModuleId];
+  if (module?.kind !== 'widget') return null;
+  const { direction = 'horizontal', distribution = 'share', itemSize = 40, itemMinSize = 0, crossSize = 'fill', alternateColor, gap = 0 } = content;
+  const [mainKey, crossKey] = direction === 'vertical' ? ['height', 'width'] : ['width', 'height'];
+  const isFixed = distribution === 'fixed' || distribution === 'wrap';
+  const crossValue = distribution === 'wrap' || crossSize !== 'fill' ? module.root.size?.[crossKey] ?? 'hug' : 'fill';
+  const size = { [mainKey]: isFixed ? itemSize : 'fill', [crossKey]: distribution === 'wrap' && crossValue === 'fill' ? itemSize : crossValue };
+  if (!isFixed && itemMinSize > 0) size[mainKey === 'width' ? 'minWidth' : 'minHeight'] = itemMinSize;
+  const itemCount = Math.max(0, Math.min(REPEAT_DRAW_LIMIT, Math.round(content.previewCount ?? 0)));
+  const children = Array.from({ length: itemCount }, (unusedItem, itemIndex) => {
+    const isAlternate = alternateColor && Math.floor(itemIndex / Math.max(1, content.alternateEvery ?? 1)) % 2 === 1;
+    const alternateOverrides = isAlternate ? { [module.root.id]: { styleOverrides: { background: alternateColor } } } : {};
+    return { id: createItemId(itemIndex), name: `${module.name}${itemIndex + 1}`, type: 'moduleInstance', moduleId: content.itemModuleId, size: { ...size },
+      overrides: mergeOverrides(alternateOverrides, content.itemOverrides?.[itemIndex]?.overrides ?? {}) };
+  });
+  return { ...repeatWidget, type: 'container', content: {}, styleOverrides: { borderWidth: 0, radius: 0, ...repeatWidget.styleOverrides }, children,
+    widgetLayout: { mode: 'stack', direction, gap, padding: [0, 0, 0, 0], alignMain: 'start', alignCross: crossValue === 'fill' ? 'stretch' : 'start',
+      scroll: distribution === 'wrap' || !(isFixed || itemMinSize > 0) ? 'none' : 'auto', wrap: distribution === 'wrap' } };
+}
+
 /**
  * Remplace toutes les instances des écrans par leur contenu (mode test, sur une copie du document).
  * @param {object} uiDocument copie du document
@@ -218,6 +249,10 @@ export function expandAllModuleInstances(uiDocument) {
     while (node.moduleId && uiDocument.modules[node.moduleId] && !insideModuleIds.includes(node.moduleId)) {
       insideModuleIds = [...insideModuleIds, node.moduleId];
       replaceInstanceByContent(uiDocument, node);
+    }
+    if (node.type === 'repeat' && !insideModuleIds.includes(node.content?.itemModuleId)) {
+      const repeatContainer = buildRepeatContainer(uiDocument, node, () => createId(uiDocument, 'W'));
+      if (repeatContainer) Object.assign(node, repeatContainer);
     }
     getChildNodes(node).forEach((childNode) => expandNode(childNode, insideModuleIds));
   };
@@ -328,7 +363,7 @@ export function countModuleInstances(uiDocument, moduleId) {
   let instanceCount = 0;
   const visitValue = (value) => {
     if (!value || typeof value !== 'object') return;
-    if (value.moduleId === moduleId) instanceCount += 1;
+    if (value.moduleId === moduleId || value.itemModuleId === moduleId) instanceCount += 1;
     Object.values(value).forEach(visitValue);
   };
   visitValue(uiDocument.screens);
@@ -353,7 +388,7 @@ function collectReferences(value, references) {
     if (!childValue) continue;
     if (key === 'style') references.styles.add(childValue);
     else if (key === 'menuId') references.menus.add(childValue);
-    else if (key === 'moduleId') references.modules.add(childValue);
+    else if (key === 'moduleId' || key === 'itemModuleId') references.modules.add(childValue);
     else if (COLOR_KEYS.has(key) && childValue.startsWith('$')) references.colorVariables.add(childValue.slice(1));
   }
 }
@@ -507,6 +542,18 @@ function hasModuleCycle(modules, moduleId, ancestorIds = []) {
 export function assertNoModuleCycle(uiDocument) {
   const loopingId = Object.keys(uiDocument.modules).find((moduleId) => hasModuleCycle(uiDocument.modules, moduleId));
   if (loopingId) throw new Error(`Le module « ${uiDocument.modules[loopingId].name} » se contiendrait lui-même`);
+}
+
+/**
+ * Indique si un module peut être répété dans un autre (ou dans un écran) sans boucle.
+ * @param {object} uiDocument document
+ * @param {string|undefined} holderId module ou écran qui contient la répétition
+ * @param {string} moduleId module répété
+ * @returns {boolean} vrai si possible
+ */
+export function canRepeatModuleIn(uiDocument, holderId, moduleId) {
+  if (!moduleId || !uiDocument.modules[holderId]) return true;
+  return !collectModuleDependencies(uiDocument, [moduleId], true).modules.has(holderId);
 }
 
 /**

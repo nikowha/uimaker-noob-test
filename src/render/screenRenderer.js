@@ -1,6 +1,6 @@
 // Rendu d'un écran : areas découpées, placement des widgets, apparence, thème (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
-import { resolveInstanceRoot } from '../model/modules.js';
+import { buildRepeatContainer, resolveInstanceRoot } from '../model/modules.js';
 import { applyAppearanceToElement, applyThemeVariables, resolveAppearance, resolveColor } from './styleResolver.js';
 import { fillWidgetContent } from './widgetRenderer.js';
 
@@ -54,6 +54,7 @@ function applyWidgetLayout(element, widgetLayout = { mode: 'stack' }) {
     elementStyle.justifyContent = ALIGN_TO_CSS[widgetLayout.alignMain] ?? 'flex-start';
     elementStyle.alignItems = ALIGN_TO_CSS[widgetLayout.alignCross] ?? 'stretch';
     if (widgetLayout.scroll === 'auto') elementStyle.overflow = 'auto';
+    if (widgetLayout.wrap) { elementStyle.flexWrap = 'wrap'; elementStyle.alignContent = 'flex-start'; }
   }
   element.dataset.layoutMode = widgetLayout.mode ?? 'stack';
   element.dataset.layoutDirection = widgetLayout.direction ?? 'vertical';
@@ -193,6 +194,12 @@ export function renderScreen(uiDocument, screen, renderOptions) {
         return instanceElement;
       }
     }
+    const isRepeat = widget.type === 'repeat';
+    if (isRepeat) {
+      const isLooping = parentModuleIds.includes(widget.content?.itemModuleId);
+      renderedWidget = (isLooping ? null : buildRepeatContainer(uiDocument, widget, (itemIndex) => `${widget.id}#${itemIndex}`))
+        ?? { ...widget, type: 'placeholder', content: { description: 'Répétition : choisis un module de widgets à répéter' } };
+    }
     applyAppearanceToElement(widgetElement, resolveAppearance(uiDocument, renderedWidget), uiDocument, themeId, true);
     if (renderedWidget.children) {
       widgetElement.classList.add('ui-widget-container', `uiw-${renderedWidget.type}`);
@@ -201,7 +208,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       const isPageStack = renderedWidget.type === 'pageStack';
       const activePageIndex = Math.max(0, Math.min(renderedWidget.content?.activeIndex ?? 0, renderedWidget.children.length - 1));
       renderedWidget.children.forEach((childWidget, childIndex) => {
-        const childElement = renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance, parentModuleIds);
+        const childElement = renderWidget(childWidget, renderedWidget.widgetLayout, isInsideInstance || isRepeat, parentModuleIds);
         if (isPageStack && childIndex !== activePageIndex) childElement.style.display = 'none';
         widgetElement.append(childElement);
       });

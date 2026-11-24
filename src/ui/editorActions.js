@@ -205,14 +205,14 @@ export function closeModuleEditor() {
 
 /**
  * Change un élément interne pour une seule instance.
- * @param {string} instanceId instance
+ * @param {(mutateInstance: (instance: object) => void) => void} updateInstance applique une modification à l'instance
  * @param {object} entry élément interne (listInstanceNodes)
  * @param {((node: object) => void)|null} mutateNode modification, null pour revenir aux valeurs du module
  */
-export function updateInstanceNode(instanceId, entry, mutateNode) {
+export function updateInstanceNode(updateInstance, entry, mutateNode) {
   let newNode = null;
   if (mutateNode) { newNode = cloneJson(entry.node); mutateNode(newNode); }
-  updateNode(instanceId, (instance) => setInstanceNodeValues(instance, entry, newNode));
+  updateInstance((instance) => setInstanceNodeValues(instance, entry, newNode));
 }
 
 /**

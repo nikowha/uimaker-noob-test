@@ -196,7 +196,7 @@ export function computeNodePath(nodeIndex, nodeId) {
   const pathIds = [];
   let currentRecord = nodeIndex.get(nodeId);
   while (currentRecord) {
-    pathIds.unshift(currentRecord.node.id);
+    if (currentRecord.node.id) pathIds.unshift(currentRecord.node.id);
     currentRecord = currentRecord.parent ? nodeIndex.get(currentRecord.parent.id) : null;
   }
   const screenRecord = nodeIndex.get(nodeId);
@@ -306,8 +306,8 @@ export function collectSubtreeNodeIds(node) {
   return [node.id, ...[...(node.children ?? []), ...(node.widgets ?? [])].flatMap(collectSubtreeNodeIds)];
 }
 
-const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId']);
-const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor']);
+const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId', 'itemModuleId']);
+const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor', 'alternateColor']);
 
 /**
  * Copie une valeur en remplaçant les ID et toutes les références vers ces ID (liens internes compris).

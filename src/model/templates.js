@@ -176,7 +176,7 @@ function buildSettingsWindow(uiDocument) {
 }
 
 const SEQUENCER_COLORS = { background: '#121316', panel: '#1B1D22', raised: '#262930', muted: '#8B909A', border: '#33363E', accent: '#F2D24B',
-  mute: '#D9534F', solo: '#4FA3D9', tweak: '#4FC3F7', play: '#2F6F3A', stop: '#8A2F2F', darkBeat: '#1F1F1F', lightBeat: '#383838' };
+  mute: '#D9534F', solo: '#4FA3D9', tweak: '#4FC3F7', play: '#2F6F3A', stop: '#8A2F2F', step: '#2B2D33', darkBeat: '#141518', lightBeat: '#3A3C42' };
 const SEQUENCER_HEADER_WIDTH = 210;
 const SEQUENCER_BEAT_COUNT = 4;
 const SEQUENCER_STEPS_PER_BEAT = 4;
@@ -221,62 +221,121 @@ function buildToggleButton(uiDocument, name, label, size, checkedColor, styleOve
 }
 
 /**
- * Crée le module « ligne de pas » : sélection, nom, M / S / T et 16 pas rangés par temps.
+ * Enregistre un widget comme module du projet.
  * @param {object} uiDocument document
+ * @param {object} node widget
+ * @param {object} moduleValues notes, previewSize
  * @returns {string} ID du module
  */
-function createStepRowModule(uiDocument) {
-  const squareButton = { width: 30, height: 32 };
-  const header = buildPlainStack(uiDocument, 'TrackHeader', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [
-    buildToggleButton(uiDocument, 'SelectTrack', '', { width: 18, height: 18 }, SEQUENCER_COLORS.accent, { radius: 9, borderWidth: 2, borderColor: SEQUENCER_COLORS.muted }),
-    buildWidget(uiDocument, 'button', { name: 'TrackName', content: { label: 'Track' }, size: { width: 'fill', height: 32 },
-      styleOverrides: { background: SEQUENCER_COLORS.panel, padding: [0, 2, 0, 2], fontWeight: '400' }, notes: 'Touche = sélectionne la piste et joue son son.',
-      action: { type: 'custom', description: 'Sélectionne la piste et joue son son' } }),
-    buildToggleButton(uiDocument, 'MuteTrack', 'M', squareButton, SEQUENCER_COLORS.mute, { fontWeight: '700' }),
-    buildToggleButton(uiDocument, 'SoloTrack', 'S', squareButton, SEQUENCER_COLORS.solo, { fontWeight: '700' }),
-    buildToggleButton(uiDocument, 'TweakTrack', 'T', squareButton, SEQUENCER_COLORS.tweak, { fontWeight: '700' }),
-  ], { gap: 4, padding: [0, 6, 0, 8] }, { background: SEQUENCER_COLORS.panel });
-  header.children.at(-1).notes = 'Ouvre la ligne de réglages de la piste sous cette ligne (à coder).';
-  header.children[0].notes = 'Une seule piste sélectionnée à la fois (à coder).';
-  const beats = Array.from({ length: SEQUENCER_BEAT_COUNT }, (unusedBeat, beatIndex) => buildPlainStack(uiDocument, `Beat${beatIndex + 1}`, 'horizontal', { width: 'fill', height: 'fill' },
-    Array.from({ length: SEQUENCER_STEPS_PER_BEAT }, (unusedStep, stepIndex) => buildToggleButton(uiDocument, `Step${String(beatIndex * SEQUENCER_STEPS_PER_BEAT + stepIndex + 1).padStart(2, '0')}`, '',
-      { width: 'fill', height: 'fill' }, SEQUENCER_COLORS.accent,
-      { background: beatIndex % 2 ? SEQUENCER_COLORS.lightBeat : SEQUENCER_COLORS.darkBeat, borderWidth: 1, borderColor: SEQUENCER_COLORS.border })),
-    { gap: 6, padding: [3, 3, 3, 3], alignCross: 'stretch' }));
-  const row = buildPlainStack(uiDocument, 'StepTrackRow', 'horizontal', { width: 'fill', height: 'fill' }, [header, ...beats], { gap: 0, alignCross: 'stretch' });
-  const moduleId = saveNodeAsModule(uiDocument, row);
-  Object.assign(uiDocument.modules[moduleId], { previewSize: { width: 900, height: 110 }, notes: 'Une piste du séquenceur. Chaque instance règle TrackName et les pas allumés (Step01 à Step16, state.checked).' });
-  uiDocument.modules[moduleId].root.size = { width: 'fill', height: 44 };
+function addModule(uiDocument, node, moduleValues) {
+  const moduleId = saveNodeAsModule(uiDocument, node);
+  Object.assign(uiDocument.modules[moduleId], moduleValues);
   return moduleId;
 }
 
 /**
- * Crée une ligne du séquenceur : instance du module avec son nom et ses pas allumés.
+ * Crée une répétition.
  * @param {object} uiDocument document
- * @param {string} moduleId module de ligne
+ * @param {string} name nom
+ * @param {string} itemModuleId module répété
+ * @param {object} content réglages
+ * @param {object} [size] taille
+ * @returns {object} widget
+ */
+function buildRepeat(uiDocument, name, itemModuleId, content, size = { width: 'fill', height: 'fill' }) {
+  return buildWidget(uiDocument, 'repeat', { name, content: { itemModuleId, ...content }, size });
+}
+
+/**
+ * Crée les 4 modules du séquenceur : un pas, un temps (répète les pas), une ligne (répète les temps), un numéro de temps.
+ * @param {object} uiDocument document
+ * @returns {{stepId: string, beatId: string, rowId: string, beatLabelId: string}} modules
+ */
+function createSequencerModules(uiDocument) {
+  const { panel, accent, muted, mute, solo, tweak, step, darkBeat, border } = SEQUENCER_COLORS;
+  const stepId = addModule(uiDocument, buildToggleButton(uiDocument, 'Step', '', { width: 'fill', height: 'fill' }, accent, { background: step, borderWidth: 1, borderColor: border }),
+    { previewSize: { width: 120, height: 120 }, notes: 'Un pas. Ses autres états (muet, sélectionné, en lecture, coupé…) sont dans l\'écran StepStatesScreen. Glisser dessine sur plusieurs pas de la même ligne.' });
+  uiDocument.modules[stepId].root.size = { width: 48, height: 48 };
+  const beatId = addModule(uiDocument, buildPlainStack(uiDocument, 'Beat', 'horizontal', { width: 'fill', height: 'fill' }, [
+    buildRepeat(uiDocument, 'Steps', stepId, { previewCount: SEQUENCER_STEPS_PER_BEAT, countSource: 'beat.steps (longueur du temps / résolution de la piste)', minCount: 1, maxCount: 32, distribution: 'position',
+      positionSource: 'step.startTick, step.durationTicks (tuplets, swing, zoom)', gap: 6 }),
+  ], { padding: [3, 3, 3, 3], alignCross: 'stretch' }, { background: darkBeat }), { previewSize: { width: 280, height: 110 }, notes: 'Un temps de la mesure. Porte la couleur du temps et le repère à gauche ; largeur proportionnelle à sa durée.' });
+  uiDocument.modules[beatId].root.size = { width: 220, height: 52 };
+  const squareButton = { width: 30, height: 32 };
+  const header = buildPlainStack(uiDocument, 'TrackHeader', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [
+    buildToggleButton(uiDocument, 'SelectTrack', '', { width: 18, height: 18 }, accent, { radius: 9, borderWidth: 2, borderColor: muted }),
+    buildWidget(uiDocument, 'button', { name: 'TrackName', content: { label: 'Track' }, size: { width: 'fill', height: 32 },
+      styleOverrides: { background: panel, padding: [0, 2, 0, 2], fontWeight: '400' }, action: { type: 'custom', description: 'Sélectionne la piste et joue son son' } }),
+    buildToggleButton(uiDocument, 'MuteTrack', 'M', squareButton, mute, { fontWeight: '700' }),
+    buildToggleButton(uiDocument, 'SoloTrack', 'S', squareButton, solo, { fontWeight: '700' }),
+    buildToggleButton(uiDocument, 'TweakTrack', 'T', squareButton, tweak, { fontWeight: '700' }),
+  ], { gap: 4, padding: [0, 6, 0, 8] }, { background: panel });
+  header.children.at(-1).notes = 'Ouvre la ligne de réglages de la piste sous cette ligne (à coder).';
+  header.children[0].notes = 'Une seule piste sélectionnée à la fois (à coder).';
+  const rowId = addModule(uiDocument, buildPlainStack(uiDocument, 'StepTrackRow', 'horizontal', { width: 'fill', height: 'fill' }, [header,
+    buildRepeat(uiDocument, 'Beats', beatId, { previewCount: SEQUENCER_BEAT_COUNT, countSource: 'pattern.beats (mesure × nombre de mesures)', minCount: 1, maxCount: 64, itemMinSize: 60,
+      gap: 0, alternateColor: SEQUENCER_COLORS.lightBeat }),
+  ], { gap: 0, alignCross: 'stretch' }), { previewSize: { width: 900, height: 110 }, notes: 'Une piste : en-tête fixe + temps répétés. Toutes les lignes défilent ensemble horizontalement, l\'en-tête reste visible.' });
+  uiDocument.modules[rowId].root.size = { width: 'fill', height: 44 };
+  const beatLabelId = addModule(uiDocument, buildWidget(uiDocument, 'text', { name: 'BeatLabel', content: { text: '1', textRole: 'caption' }, size: { width: 'fill', height: 'fill' }, styleOverrides: { textColor: muted, padding: [4, 0, 0, 6] } }),
+    { previewSize: { width: 120, height: 60 }, notes: 'Numéro du temps ; le premier temps de chaque mesure est en gras (à coder).' });
+  return { stepId, beatId, rowId, beatLabelId };
+}
+
+/**
+ * Valeurs d'exemple d'une ligne : nom, sélection et pas allumés.
+ * @param {object} uiDocument document
+ * @param {object} moduleIds modules du séquenceur
  * @param {string} trackName nom affiché
  * @param {number[]} activeSteps pas allumés (1 à 16)
  * @param {boolean} isSelected piste sélectionnée
- * @returns {object} instance
+ * @returns {object} { overrides }
  */
-function buildStepRow(uiDocument, moduleId, trackName, activeSteps, isSelected) {
-  const moduleRoot = uiDocument.modules[moduleId].root;
-  const instance = createModuleInstance(uiDocument, moduleId);
-  Object.assign(instance, { name: `${trackName.replace(/\s+/g, '')}Row`, size: { width: 'fill', height: 'fill' } });
-  instance.overrides[findWidgetByName(moduleRoot, 'TrackName').id] = { content: { label: trackName } };
-  for (const stepNumber of activeSteps) instance.overrides[findWidgetByName(moduleRoot, `Step${String(stepNumber).padStart(2, '0')}`).id] = { state: { checked: true } };
-  if (isSelected) instance.overrides[findWidgetByName(moduleRoot, 'SelectTrack').id] = { state: { checked: true } };
-  return instance;
+function buildRowExample(uiDocument, { stepId, beatId, rowId }, trackName, activeSteps, isSelected) {
+  const rowRoot = uiDocument.modules[rowId].root;
+  const stepsRepeatId = findWidgetByName(uiDocument.modules[beatId].root, 'Steps').id;
+  const stepRootId = uiDocument.modules[stepId].root.id;
+  const overrides = { [findWidgetByName(rowRoot, 'TrackName').id]: { content: { label: trackName } } };
+  if (isSelected) overrides[findWidgetByName(rowRoot, 'SelectTrack').id] = { state: { checked: true } };
+  const beatExamples = {};
+  for (const stepNumber of activeSteps) {
+    const beatIndex = Math.floor((stepNumber - 1) / SEQUENCER_STEPS_PER_BEAT);
+    const beatExample = beatExamples[beatIndex] ??= { overrides: { [stepsRepeatId]: { content: { itemOverrides: {} } } } };
+    beatExample.overrides[stepsRepeatId].content.itemOverrides[(stepNumber - 1) % SEQUENCER_STEPS_PER_BEAT] = { overrides: { [stepRootId]: { state: { checked: true } } } };
+  }
+  if (activeSteps.length) overrides[findWidgetByName(rowRoot, 'Beats').id] = { content: { itemOverrides: beatExamples } };
+  return { overrides };
+}
+
+/**
+ * Écran « fiche » qui montre les états d'un pas, pour le codeur.
+ * @param {object} uiDocument document
+ * @param {string} stepId module du pas
+ * @returns {object} écran
+ */
+function buildStepStatesScreen(uiDocument, stepId) {
+  const stepRootId = uiDocument.modules[stepId].root.id;
+  const { accent, muted } = SEQUENCER_COLORS;
+  const states = [
+    ['Off', 'Éteint', {}], ['On', 'Allumé', { state: { checked: true } }], ['Selected', 'Sélectionné', { styleOverrides: { borderWidth: 3, borderColor: '#FFFFFF' } }],
+    ['Muted', 'Piste muette', { state: { checked: true }, styleOverrides: { opacity: 0.35 } }], ['Playing', 'En lecture', { state: { checked: true }, styleOverrides: { borderWidth: 3, borderColor: '#6BE38B' } }],
+    ['Split', 'Plusieurs notes', { state: { checked: true }, content: { label: '3', checkedColor: accent }, styleOverrides: { textColor: '#1A1600' } }],
+  ];
+  return buildScreen(uiDocument, 'custom', 'StepStatesScreen', () => buildLeafArea(uiDocument, 'Root', { mode: 'fill' }, { mode: 'grid', columns: ['1fr', '1fr', '1fr'], gap: 24, padding: [24, 24, 24, 24] },
+    states.map(([stateName, stateLabel, override]) => buildPlainStack(uiDocument, `StepState${stateName}`, 'vertical', { width: 'fill', height: 'hug' }, [
+      Object.assign(createModuleInstance(uiDocument, stepId), { name: `Step${stateName}`, size: { width: 64, height: 64 }, overrides: Object.keys(override).length ? { [stepRootId]: override } : {} }),
+      buildWidget(uiDocument, 'text', { name: `Label${stateName}`, content: { text: stateLabel, textRole: 'caption' }, styleOverrides: { textColor: muted } }),
+    ], { alignCross: 'start' }))), { size: { width: 560, height: 340 }, notes: 'Fiche pour le codeur, pas un écran de l\'app : apparence du module Step dans chaque état.' });
 }
 
 /**
  * Écran de séquenceur à pas, inspiré du projet STEP_SEQUENCER : barre du haut, pistes 808 / 909, outils, navigation.
- * Chaque ligne de pas est une instance du même module. Les onglets pilotent des piles de pages.
+ * Les pas, les temps et les lignes sont des répétitions de modules. Les onglets pilotent des piles de pages.
  * @param {object} uiDocument document
- * @returns {object} écran
+ * @returns {object[]} [séquenceur, fiche des états d'un pas]
  */
 function buildStepSequencer(uiDocument) {
-  const { raised, panel, muted, accent, background, border } = SEQUENCER_COLORS;
+  const { raised, panel, muted, background, border } = SEQUENCER_COLORS;
   const caption = (name, text, size) => buildWidget(uiDocument, 'text', { name, content: { text, textRole: 'caption' }, size: size ?? { width: 'hug', height: 'hug' }, styleOverrides: { textColor: muted } });
   const button = (name, label, size, styleOverrides = {}) => buildWidget(uiDocument, 'button', { name, content: { label }, size,
     styleOverrides: { background: raised, padding: [0, 4, 0, 4], fontWeight: '400', ...styleOverrides }, action: { type: 'custom', description: label } });
@@ -284,11 +343,13 @@ function buildStepSequencer(uiDocument) {
   const stepper = (prefix, value) => [button(`${prefix}Minus`, '−', { width: 28, height: 32 }),
     buildWidget(uiDocument, 'textField', { name: `${prefix}Field`, content: { value, placeholder: '', inputKind: 'number' }, size: { width: 46, height: 32 } }),
     button(`${prefix}Plus`, '+', { width: 28, height: 32 })];
-  const moduleId = createStepRowModule(uiDocument);
+  const moduleIds = createSequencerModules(uiDocument);
 
   const machinePages = buildWidget(uiDocument, 'pageStack', { name: 'MachinePages', size: { width: 'fill', height: 'fill' } });
   machinePages.children = Object.entries(SEQUENCER_TRACKS).map(([machineName, tracks]) => {
-    const page = buildPage(uiDocument, `Page${machineName}`, tracks.map(([trackName, activeSteps], trackIndex) => buildStepRow(uiDocument, moduleId, trackName, activeSteps, trackIndex === 0)));
+    const page = buildPage(uiDocument, `Page${machineName}`, [buildRepeat(uiDocument, `Tracks${machineName}`, moduleIds.rowId, {
+      previewCount: tracks.length, countSource: `machine${machineName}.tracks`, minCount: 1, maxCount: 16, direction: 'vertical', itemMinSize: 36, gap: 0,
+      itemOverrides: Object.fromEntries(tracks.map(([trackName, activeSteps], trackIndex) => [trackIndex, buildRowExample(uiDocument, moduleIds, trackName, activeSteps, trackIndex === 0)])) })]);
     page.widgetLayout.gap = 0;
     return page;
   });
@@ -300,8 +361,9 @@ function buildStepSequencer(uiDocument) {
     ], { gap: 0 }),
     buildPlainStack(uiDocument, 'BeatRuler', 'horizontal', { width: 'fill', height: 26 }, [
       buildPlainStack(uiDocument, 'RulerSpacer', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [], {}, { background: panel }),
-      ...Array.from({ length: SEQUENCER_BEAT_COUNT }, (unusedBeat, beatIndex) => buildPlainStack(uiDocument, `RulerBeat${beatIndex + 1}`, 'horizontal', { width: 'fill', height: 'fill' },
-        [caption(`BeatLabel${beatIndex + 1}`, String(beatIndex + 1))], { padding: [0, 0, 0, 6] })),
+      buildRepeat(uiDocument, 'BeatLabels', moduleIds.beatLabelId, { previewCount: SEQUENCER_BEAT_COUNT, countSource: 'pattern.beats', minCount: 1, maxCount: 64, itemMinSize: 60, gap: 0,
+        itemOverrides: Object.fromEntries(Array.from({ length: SEQUENCER_BEAT_COUNT }, (unusedBeat, beatIndex) => [beatIndex,
+          { overrides: { [uiDocument.modules[moduleIds.beatLabelId].root.id]: { content: { text: String(beatIndex + 1) } } } }])) }),
     ], { gap: 0, alignCross: 'stretch' }),
     machinePages,
     buildPlainStack(uiDocument, 'NavigationBar', 'horizontal', { width: 'fill', height: 92 }, [
@@ -339,13 +401,14 @@ function buildStepSequencer(uiDocument) {
     buildWidget(uiDocument, 'button', { name: 'SettingsButton', content: { label: 'Settings', icon: 'lucide:settings' }, size: { width: 'fill', height: 44 },
       styleOverrides: { background: raised, padding: [0, 4, 0, 4], fontWeight: '400' }, action: { type: 'custom', description: 'Ouvre les réglages' } })];
   const panelLook = { styleOverrides: { background: panel, borderWidth: 1, borderColor: border } };
-  return buildScreen(uiDocument, 'ipad', 'StepSequencerScreen', () => buildSplitArea(uiDocument, 'Root', 'vertical', null, [
+  const sequencerScreen = buildScreen(uiDocument, 'ipad', 'StepSequencerScreen', () => buildSplitArea(uiDocument, 'Root', 'vertical', null, [
     buildLeafArea(uiDocument, 'TopBarArea', { mode: 'fixed', size: 52 }, { ...HORIZONTAL_BAR, gap: 6, padding: [0, 12, 0, 12] }, topWidgets, panelLook),
     buildSplitArea(uiDocument, 'MainArea', 'horizontal', { mode: 'fill' }, [
       buildLeafArea(uiDocument, 'EditorArea', { mode: 'fill' }, { ...VERTICAL_STACK, gap: 0, padding: [0, 0, 0, 0] }, [modePages], { styleOverrides: { background } }),
       buildLeafArea(uiDocument, 'ToolsArea', { mode: 'fixed', size: 120 }, { ...VERTICAL_STACK, padding: [8, 8, 8, 8] }, toolWidgets, panelLook),
     ]),
-  ]), { notes: `Séquenceur à pas inspiré du projet STEP_SEQUENCER. Chaque ligne est une instance du module ${moduleId}. Les outils de droite dépendent du mode (à coder). Accent : ${accent}.` });
+  ]), { notes: 'Séquenceur à pas inspiré du projet STEP_SEQUENCER. Le nombre de pistes, de temps et de pas vient des données de l\'app (voir les répétitions). Les outils de droite dépendent du mode (à coder).' });
+  return [sequencerScreen, buildStepStatesScreen(uiDocument, moduleIds.stepId)];
 }
 
 /**
@@ -569,7 +632,7 @@ const SCREEN_TEMPLATES = {
           content: { tabs: [{ label: 'Home', icon: 'lucide:house' }, { label: 'Search', icon: 'lucide:search' }, { label: 'Profile', icon: 'lucide:user' }] } }),
       ], { styleOverrides: PANEL_LOOK }),
     ])) },
-  stepSequencer: { label: 'iPad : séquenceur à pas (ligne = module)', icon: 'drum', build: buildStepSequencer },
+  stepSequencer: { label: 'iPad : séquenceur à pas (répétitions)', icon: 'drum', build: buildStepSequencer },
   allWidgets: { label: 'Tous les widgets (grille)', icon: 'layout-grid', build: (uiDocument) => buildScreen(uiDocument, '16:9-small', 'AllWidgetsScreen',
     () => buildLeafArea(uiDocument, 'Root', { mode: 'fill' }, { mode: 'grid', columns: ['1fr', '1fr', '1fr', '1fr'], gap: 16, padding: [16, 16, 16, 16] },
       Object.keys(WIDGET_TYPES).map((widgetType) => {

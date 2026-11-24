@@ -3,7 +3,7 @@ import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
-import { countModuleInstances, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
+import { canRepeatModuleIn, countModuleInstances, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
 import { getLibraryEntry } from '../io/moduleLibrary.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
@@ -25,6 +25,8 @@ let panelBodyElement = null;
 let sectionSelectHost = null;
 /** Élément interne choisi pour chaque instance (clé = ID de l'instance). */
 const innerNodeKeyByInstance = new Map();
+/** Élément choisi dans chaque répétition (clé = ID de la répétition). */
+const repeatItemIndexByWidget = new Map();
 
 /**
  * Champs d'apparence (style ou valeurs propres d'un élément).
@@ -245,6 +247,16 @@ function createWidgetLayoutSection(holderNode) {
 }
 
 /**
+ * Indique si un widget peut répéter un module sans créer de boucle.
+ * @param {string} widgetId widget
+ * @param {string} moduleId module
+ * @returns {boolean} vrai si possible
+ */
+function canRepeatModule(widgetId, moduleId) {
+  return canRepeatModuleIn(appState.uiDocument, buildNodeIndex(appState.uiDocument).get(widgetId)?.screen.id, moduleId);
+}
+
+/**
  * Champ de contenu d'un widget selon sa définition dans le catalogue.
  * @param {object} widget widget
  * @param {object} fieldDefinition { target, key, label, kind, options }
@@ -262,9 +274,16 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
       targetWidget.size = newValue === 'vertical' ? { width: 1, height: 'fill' } : { width: 'fill', height: 1 };
     }
   });
+  /** Change le module répété ; refusé s'il finirait par se contenir lui-même. Les exemples de l'ancien module sont retirés. */
+  const commitModuleChoice = (moduleId) => {
+    if (!canRepeatModule(widget.id, moduleId)) { alert('Impossible : ce module se contiendrait lui-même.'); notifyChange(); return; }
+    updateWidget((targetWidget) => { targetWidget.content = { ...targetWidget.content, itemModuleId: moduleId }; delete targetWidget.content.itemOverrides; });
+  };
   switch (fieldDefinition.kind) {
     case 'textarea': return createTextField(fieldDefinition.label, currentValue, commitValue, { isMultiline: true });
-    case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0));
+    case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0), { min: fieldDefinition.min, max: fieldDefinition.max });
+    case 'moduleSelect': return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— choisir un module —' },
+      ...Object.entries(appState.uiDocument.modules).filter(([, module]) => module.kind === 'widget').map(([moduleId, module]) => ({ value: moduleId, label: `${module.name} (${moduleId})` }))], commitModuleChoice);
     case 'select': return createSelectField(fieldDefinition.label, currentValue, fieldDefinition.options, commitValue);
     case 'checkbox': return createCheckboxField(fieldDefinition.label, currentValue, commitValue);
     case 'color': return createColorField(fieldDefinition.label, currentValue, appState.uiDocument, appState.currentThemeId, commitValue);
@@ -324,7 +343,7 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
         on: { click: (clickEvent) => { clickEvent.preventDefault(); appState.rightPanelSection = 'icons'; notifyChange(); } } }));
       return textRow;
     }
-    default: return createTextField(fieldDefinition.label, currentValue, commitValue);
+    default: return createTextField(fieldDefinition.label, currentValue, commitValue, { placeholder: fieldDefinition.placeholder });
   }
 }
 
@@ -356,6 +375,7 @@ function createWidgetProperties(widget, record) {
   ].filter(Boolean))];
   if (widget.type === 'moduleInstance') sections.push(createInstanceSettingsSection(widget));
   if (typeDefinition?.fields.length) sections.push(createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition))));
+  if (widget.type === 'repeat' && widget.content?.itemModuleId) sections.push(...createRepeatSections(widget));
   const sizeAndPlacementFields = [
     createSizeField('Largeur', widget.size?.width, (width) => updateSize('width', width)),
     createSizeField('Hauteur', widget.size?.height, (height) => updateSize('height', height)),
@@ -416,23 +436,25 @@ function createModuleButtonRow(moduleId) {
 /**
  * Section « Réglages de cette instance » : change un élément interne sans toucher aux autres instances.
  * @param {object} instance widget ou area qui utilise un module
+ * @param {(mutateInstance: (instance: object) => void) => void} [updateInstance] applique une modification à l'instance
+ * @param {string} [title] titre
  * @returns {HTMLElement} section
  */
-function createInstanceSettingsSection(instance) {
+function createInstanceSettingsSection(instance, updateInstance = (mutateInstance) => updateNode(instance.id, mutateInstance), title = 'Réglages de cette instance') {
   const entries = listInstanceNodes(appState.uiDocument, instance);
-  if (entries.length === 0) return createPanelSection('Réglages de cette instance', [createElement('div', { className: 'panel-hint', text: 'Module introuvable.' })]);
+  if (entries.length === 0) return createPanelSection(title, [createElement('div', { className: 'panel-hint', text: 'Module introuvable.' })]);
   const getEntryKey = (entry) => [...entry.path, entry.node.id].join('/');
   const selectedEntry = entries.find((entry) => getEntryKey(entry) === innerNodeKeyByInstance.get(instance.id))
     ?? entries.find((entry) => WIDGET_TYPES[entry.node.type]?.fields.length && !entry.node.children) ?? entries[0];
   const { node } = selectedEntry;
-  const updateInner = (mutateNode) => updateInstanceNode(instance.id, selectedEntry, mutateNode);
+  const updateInner = (mutateNode) => updateInstanceNode(updateInstance, selectedEntry, mutateNode);
   const isInstanceRoot = selectedEntry === entries[0];
   const typeDefinition = WIDGET_TYPES[node.type];
   const updateState = (key, value) => updateInner((targetNode) => { targetNode.state = { ...targetNode.state, [key]: value }; });
   const styleChoices = [{ value: '', label: '— aucun —' }, ...Object.entries(appState.uiDocument.styles).map(([styleId, style]) => ({ value: styleId, label: `${style.name} (${styleId})` }))];
   const changedCount = entries.filter((entry) => entry.isChanged).length;
   const contentFields = (typeDefinition?.fields ?? []).filter((fieldDefinition) => fieldDefinition.target !== 'widget' && fieldDefinition.kind !== 'pageStackRef');
-  return createPanelSection('Réglages de cette instance', [
+  return createPanelSection(title, [
     createElement('div', { className: 'panel-hint', text: 'Change un élément ici sans toucher aux autres instances. ● = différent du module.' }),
     createSelectField('Élément', getEntryKey(selectedEntry), entries.map((entry) => ({ value: getEntryKey(entry), label: `${'\u2003'.repeat(entry.depth)}${entry.isChanged ? '● ' : ''}${entry.node.name ?? entry.node.id} (${entry.node.id})` })),
       (entryKey) => { innerNodeKeyByInstance.set(instance.id, entryKey); notifyChange(); }),
@@ -453,9 +475,31 @@ function createInstanceSettingsSection(instance) {
     isInstanceRoot ? null : createPanelSection('Événements (cette instance)', [createEventsSection(node, false, updateInner)], false),
     createButtonRow([
       selectedEntry.isChanged ? { label: 'Rétablir cet élément', onClick: () => updateInner(null) } : null,
-      changedCount ? { label: `Tout rétablir (${changedCount})`, onClick: () => updateNode(instance.id, (targetInstance) => { targetInstance.overrides = {}; }) } : null,
+      changedCount ? { label: `Tout rétablir (${changedCount})`, onClick: () => updateInstance((targetInstance) => { targetInstance.overrides = {}; }) } : null,
     ].filter(Boolean)),
   ].filter(Boolean));
+}
+
+/**
+ * Sections d'une répétition : module répété et valeurs d'exemple de chaque élément.
+ * @param {object} widget répétition
+ * @returns {HTMLElement[]} sections
+ */
+function createRepeatSections(widget) {
+  const itemCount = Math.max(1, widget.content.previewCount ?? 1);
+  const itemIndex = Math.min(repeatItemIndexByWidget.get(widget.id) ?? 0, itemCount - 1);
+  const itemInstance = { id: `${widget.id}#${itemIndex}`, moduleId: widget.content.itemModuleId, overrides: widget.content.itemOverrides?.[itemIndex]?.overrides };
+  const updateItem = (mutateItem) => updateNode(widget.id, (targetWidget) => {
+    const itemOverrides = targetWidget.content.itemOverrides ??= {};
+    mutateItem(itemOverrides[itemIndex] ??= {});
+    if (Object.keys(itemOverrides[itemIndex].overrides ?? {}).length === 0) delete itemOverrides[itemIndex];
+  });
+  return [createPanelSection('Éléments répétés', [
+    createElement('div', { className: 'panel-hint', text: 'Le nombre d\'exemple sert à dessiner et à tester ; l\'app décidera du vrai nombre. Tu peux donner des valeurs d\'exemple à chaque élément.' }),
+    createModuleButtonRow(widget.content.itemModuleId),
+    createSelectField('Élément à régler', String(itemIndex), Array.from({ length: itemCount }, (unusedItem, index) => ({ value: String(index),
+      label: `${widget.content.itemOverrides?.[index] ? '● ' : ''}Élément ${index + 1}` })), (indexText) => { repeatItemIndexByWidget.set(widget.id, Number(indexText)); notifyChange(); }),
+  ]), createInstanceSettingsSection(itemInstance, updateItem, 'Valeurs d\'exemple de l\'élément')];
 }
 
 /**
