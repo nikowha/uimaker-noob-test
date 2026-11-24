@@ -3,6 +3,7 @@
 // Gestes : souris (clic, double clic, clic droit, milieu, survol, molette), doigt (tap, double tap, appui long),
 // Pencil (tap ; ou « souris simulée » réglable), double tap / squeeze du Pencil simulés par des boutons.
 import { createElement } from '../utils/dom.js';
+import { attachNumberLimits } from '../utils/numbers.js';
 import { appSettings, appState, updateAppSetting } from '../model/store.js';
 import { buildNodeIndex, cloneJson } from '../model/document.js';
 import { expandAllModuleInstances } from '../model/modules.js';
@@ -746,6 +747,7 @@ function rememberStartValues() {
 function createVariableControl(variableId, variable) {
   const inputElement = createElement('input', { attributes: { type: variable.kind === 'boolean' ? 'checkbox' : variable.kind === 'number' ? 'number' : 'text', inputmode: variable.kind === 'number' ? 'numeric' : undefined, min: variable.min, max: variable.max },
     on: { change: () => setTestVariable(variableId, variable.kind === 'boolean' ? inputElement.checked : inputElement.value) } });
+  if (variable.kind === 'number') attachNumberLimits(inputElement, variable);
   if (variable.kind === 'boolean') inputElement.checked = variable.value; else inputElement.value = variable.value;
   const createStepButton = (label, delta) => createElement('button', { text: label, attributes: { type: 'button' }, on: { click: () => setTestVariable(variableId, variable.value + delta) } });
   return createElement('label', { className: 'test-toggle test-variable', attributes: { title: variable.description || variable.name } }, [

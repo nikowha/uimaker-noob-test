@@ -2,6 +2,7 @@
 // Pencil / souris = outil (sélection, déplacement) ; doigt = navigation (1 doigt glisse, 2 doigts zooment) ;
 // un tap du doigt sélectionne aussi.
 import { createElement } from '../utils/dom.js';
+import { limitNumber } from '../utils/numbers.js';
 import { appSettings, appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import { buildNodeIndex, createModuleScreen, isWidgetHolder } from '../model/document.js';
 import { renderScreen } from '../render/screenRenderer.js';
@@ -181,6 +182,9 @@ function computeOffsetAfterResize(offset, anchorPart, isStartSide, sizeDelta) {
  */
 function commitResizeGesture(resizeGesture) {
   if (resizeGesture.newWidth === null && resizeGesture.newHeight === null) { notifyChange(); return; }
+  const limitedSize = buildNodeIndex(appState.uiDocument).get(resizeGesture.widgetId)?.node.size ?? {};
+  if (resizeGesture.newWidth !== null) resizeGesture.newWidth = limitNumber(resizeGesture.newWidth, { min: limitedSize.minWidth, max: limitedSize.maxWidth });
+  if (resizeGesture.newHeight !== null) resizeGesture.newHeight = limitNumber(resizeGesture.newHeight, { min: limitedSize.minHeight, max: limitedSize.maxHeight });
   commitChange((uiDocument) => {
     const widget = buildNodeIndex(uiDocument).get(resizeGesture.widgetId)?.node;
     if (!widget) return;

@@ -1,14 +1,15 @@
 // Fenêtre de gauche : paramètres de l'élément sélectionné, ou arbre écran > areas > widgets (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
+import { limitNumber } from '../utils/numbers.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
-import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
+import { ANCHORS, APPEARANCE_FIELDS, getFieldLimits, limitWidgetNumbers, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
 import { addModuleState, canRepeatModuleIn, countModuleInstances, deleteModuleState, getRepeatCount, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
 import { getLibraryEntry } from '../io/moduleLibrary.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
   createButtonRow, createCheckboxField, createColorField, createInfoRow, createNumberField, createPanelSection,
-  createSelectElement, createSelectField, createSizeField, createTextField,
+  createSelectElement, createSelectField, createSidesField, createSizeField, createTextField,
 } from './fields.js';
 import { createActionEditor, createEventsSection } from './actionEditor.js';
 import {
@@ -42,12 +43,7 @@ function createAppearanceFields(appearanceValues, onFieldChange) {
     if (fieldDefinition.kind === 'color') return createColorField(fieldDefinition.label, currentValue, uiDocument, currentThemeId, (newValue) => onFieldChange(fieldDefinition.key, newValue));
     if (fieldDefinition.kind === 'number') return createNumberField(fieldDefinition.label, currentValue, (newValue) => onFieldChange(fieldDefinition.key, newValue), fieldDefinition);
     if (fieldDefinition.kind === 'select') return createSelectField(fieldDefinition.label, currentValue ?? '', fieldDefinition.options, (newValue) => onFieldChange(fieldDefinition.key, newValue || undefined));
-    return createTextField(fieldDefinition.label, Array.isArray(currentValue) ? currentValue.join(' ') : '', (newText) => {
-      const paddingValues = newText.trim().split(/[\s,]+/).filter(Boolean).map(Number);
-      if (paddingValues.length === 0) { onFieldChange(fieldDefinition.key, undefined); return; }
-      const [topValue, rightValue = topValue, bottomValue = topValue, leftValue = rightValue] = paddingValues;
-      onFieldChange(fieldDefinition.key, [topValue, rightValue, bottomValue, leftValue]);
-    }, { placeholder: 'ex. 8 ou 6 14 6 14' });
+    return createSidesField(fieldDefinition.label, currentValue, (newValues) => onFieldChange(fieldDefinition.key, newValues));
   });
 }
 
@@ -155,10 +151,10 @@ function createScreenProperties(screen) {
         targetScreen.orientation = orientation;
         targetScreen.size = { width: targetScreen.size.height, height: targetScreen.size.width };
       })),
-    createNumberField('Largeur', screen.size.width, (width) => updateNode(screen.id, (targetScreen) => { if (width > 0) { targetScreen.size.width = width; targetScreen.preset = 'custom'; } })),
-    createNumberField('Hauteur', screen.size.height, (height) => updateNode(screen.id, (targetScreen) => { if (height > 0) { targetScreen.size.height = height; targetScreen.preset = 'custom'; } })),
-    createTextField('Zones sûres (h d b g)', ['top', 'right', 'bottom', 'left'].map((side) => screen.safeArea?.[side] ?? 0).join(' '), (safeText) => updateNode(screen.id, (targetScreen) => {
-      const [top = 0, right = 0, bottom = 0, left = 0] = safeText.trim().split(/[\s,]+/).map(Number);
+    createNumberField('Largeur', screen.size.width, (width) => updateNode(screen.id, (targetScreen) => { if (width > 0) { targetScreen.size.width = width; targetScreen.preset = 'custom'; } }), { min: 1, isInteger: true }),
+    createNumberField('Hauteur', screen.size.height, (height) => updateNode(screen.id, (targetScreen) => { if (height > 0) { targetScreen.size.height = height; targetScreen.preset = 'custom'; } }), { min: 1, isInteger: true }),
+    createSidesField('Zones sûres', ['top', 'right', 'bottom', 'left'].map((side) => screen.safeArea?.[side] ?? 0), (safeValues) => updateNode(screen.id, (targetScreen) => {
+      const [top, right, bottom, left] = safeValues ?? [0, 0, 0, 0];
       targetScreen.safeArea = { top, right, bottom, left };
     })),
     createNotesField(screen),
@@ -174,7 +170,11 @@ function createScreenProperties(screen) {
  */
 function createAreaProperties(area, record) {
   const sizing = area.sizing ?? { mode: 'fill' };
-  const updateSizing = (key, value) => updateNode(area.id, (targetArea) => { targetArea.sizing ??= { mode: 'fill' }; setOrDeleteValue(targetArea.sizing, key, value); });
+  const updateSizing = (key, value) => updateNode(area.id, (targetArea) => {
+    targetArea.sizing ??= { mode: 'fill' };
+    setOrDeleteValue(targetArea.sizing, key, value);
+    if (typeof targetArea.sizing.size === 'number') targetArea.sizing.size = limitNumber(targetArea.sizing.size, targetArea.sizing);
+  });
   const sections = [createPanelSection('Area', [
     ...createIdentityFields(area),
     createButtonRow([
@@ -192,10 +192,10 @@ function createAreaProperties(area, record) {
   if (record.parent) {
     sections.push(createPanelSection('Taille dans le découpage', [
       createSelectField('Mode', sizing.mode, SIZING_MODES, (mode) => updateSizing('mode', mode)),
-      sizing.mode === 'fixed' ? createNumberField('Taille (px)', sizing.size, (size) => updateSizing('size', size), { min: 0 }) : null,
+      sizing.mode === 'fixed' ? createNumberField('Taille (px)', sizing.size, (size) => updateSizing('size', size), { min: sizing.min ?? 0, max: sizing.max }) : null,
       sizing.mode === 'proportional' ? createNumberField('Proportion (0–1)', sizing.ratio, (ratio) => updateSizing('ratio', ratio), { step: 0.01, min: 0.05, max: 0.95 }) : null,
-      createNumberField('Min (px)', sizing.min, (minimum) => updateSizing('min', minimum)),
-      createNumberField('Max (px)', sizing.max, (maximum) => updateSizing('max', maximum)),
+      createNumberField('Min (px)', sizing.min, (minimum) => updateSizing('min', minimum), { min: 0, max: sizing.max }),
+      createNumberField('Max (px)', sizing.max, (maximum) => updateSizing('max', maximum), { min: sizing.min ?? 0 }),
       createCheckboxField('Séparateur déplaçable après cette area (dans l\'app)', area.resizableSplitter ?? appState.uiDocument.project.defaults?.resizableSplitter,
         (isResizable) => updateNode(area.id, (targetArea) => { targetArea.resizableSplitter = isResizable; })),
     ]));
@@ -216,12 +216,6 @@ function createAreaProperties(area, record) {
 function createWidgetLayoutSection(holderNode) {
   const widgetLayout = holderNode.widgetLayout ?? { mode: 'stack' };
   const updateLayout = (key, value) => updateNode(holderNode.id, (targetNode) => { targetNode.widgetLayout ??= { mode: 'stack' }; setOrDeleteValue(targetNode.widgetLayout, key, value); });
-  const parsePadding = (paddingText) => {
-    const paddingValues = paddingText.trim().split(/[\s,]+/).filter(Boolean).map(Number);
-    if (paddingValues.length === 0) return undefined;
-    const [topValue, rightValue = topValue, bottomValue = topValue, leftValue = rightValue] = paddingValues;
-    return [topValue, rightValue, bottomValue, leftValue];
-  };
   const parseTracks = (tracksText) => tracksText.trim().split(/\s+/).filter(Boolean).map((track) => (/^\d+$/.test(track) ? Number(track) : track));
   const modeFields = [];
   if (widgetLayout.mode === 'stack' || !widgetLayout.mode) {
@@ -242,8 +236,8 @@ function createWidgetLayoutSection(holderNode) {
   return createPanelSection('Placement des widgets', [
     createSelectField('Mode', widgetLayout.mode ?? 'stack', LAYOUT_MODES, (mode) => updateLayout('mode', mode)),
     ...modeFields,
-    widgetLayout.mode !== 'free' ? createNumberField('Espacement', widgetLayout.gap, (gap) => updateLayout('gap', gap)) : null,
-    widgetLayout.mode !== 'free' ? createTextField('Marges (h d b g)', (widgetLayout.padding ?? []).join(' '), (paddingText) => updateLayout('padding', parsePadding(paddingText))) : null,
+    widgetLayout.mode !== 'free' ? createNumberField('Espacement', widgetLayout.gap, (gap) => updateLayout('gap', gap), { min: 0 }) : null,
+    widgetLayout.mode !== 'free' ? createSidesField('Marges', widgetLayout.padding, (padding) => updateLayout('padding', padding)) : null,
   ]);
 }
 
@@ -271,6 +265,7 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
     if (fieldDefinition.target === 'widget') { targetWidget[fieldDefinition.key] = newValue; return; }
     targetWidget[fieldDefinition.target] ??= {};
     targetWidget[fieldDefinition.target][fieldDefinition.key] = newValue;
+    limitWidgetNumbers(targetWidget);
     if (targetWidget.type === 'separator' && fieldDefinition.key === 'orientation') {
       targetWidget.size = newValue === 'vertical' ? { width: 1, height: 'fill' } : { width: 'fill', height: 1 };
     }
@@ -282,7 +277,7 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
   };
   switch (fieldDefinition.kind) {
     case 'textarea': return createTextField(fieldDefinition.label, currentValue, commitValue, { isMultiline: true });
-    case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0), { min: fieldDefinition.min, max: fieldDefinition.max });
+    case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0), { step: fieldDefinition.step, isInteger: fieldDefinition.isInteger, ...getFieldLimits(fieldDefinition, widget) });
     case 'numberVariable': return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— aucune —' },
       ...Object.entries(appState.uiDocument.variables ?? {}).filter(([, variable]) => variable.kind === 'number').map(([variableId, variable]) => ({ value: variableId, label: `${variable.name} = ${variable.value}` }))],
     (variableId) => commitValue(variableId || undefined));
@@ -361,7 +356,13 @@ function createWidgetProperties(widget, record) {
   const typeDefinition = WIDGET_TYPES[widget.type];
   const isModuleRoot = !record.siblings;
   const parentLayout = record.parent.widgetLayout ?? { mode: 'stack' };
-  const updateSize = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.size ??= {}; setOrDeleteValue(targetWidget.size, key, value); });
+  const updateSize = (key, value) => updateNode(widget.id, (targetWidget) => {
+    const size = targetWidget.size ??= {};
+    setOrDeleteValue(size, key, value);
+    if (typeof size.width === 'number') size.width = limitNumber(size.width, { min: size.minWidth, max: size.maxWidth });
+    if (typeof size.height === 'number') size.height = limitNumber(size.height, { min: size.minHeight, max: size.maxHeight });
+  });
+  const sizeLimits = (capitalized) => ({ min: widget.size?.[`min${capitalized}`] ?? 0, max: widget.size?.[`max${capitalized}`] });
   const updatePlacement = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.placement ??= { anchor: 'topLeft', x: 0, y: 0 }; setOrDeleteValue(targetWidget.placement, key, value); });
   const typeLabel = widget.type === 'moduleInstance'
     ? `Module ${widget.moduleId} · ${appState.uiDocument.modules[widget.moduleId]?.name ?? '?'}`
@@ -381,12 +382,12 @@ function createWidgetProperties(widget, record) {
   if (typeDefinition?.fields.length) sections.push(createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition))));
   if (widget.type === 'repeat' && widget.content?.itemModuleId) sections.push(...createRepeatSections(widget));
   const sizeAndPlacementFields = [
-    createSizeField('Largeur', widget.size?.width, (width) => updateSize('width', width)),
-    createSizeField('Hauteur', widget.size?.height, (height) => updateSize('height', height)),
-    createNumberField('Largeur min', widget.size?.minWidth, (value) => updateSize('minWidth', value)),
-    createNumberField('Largeur max', widget.size?.maxWidth, (value) => updateSize('maxWidth', value)),
-    createNumberField('Hauteur min', widget.size?.minHeight, (value) => updateSize('minHeight', value)),
-    createNumberField('Hauteur max', widget.size?.maxHeight, (value) => updateSize('maxHeight', value)),
+    createSizeField('Largeur', widget.size?.width, (width) => updateSize('width', width), sizeLimits('Width')),
+    createSizeField('Hauteur', widget.size?.height, (height) => updateSize('height', height), sizeLimits('Height')),
+    createNumberField('Largeur min', widget.size?.minWidth, (value) => updateSize('minWidth', value), { min: 0, max: widget.size?.maxWidth }),
+    createNumberField('Largeur max', widget.size?.maxWidth, (value) => updateSize('maxWidth', value), { min: widget.size?.minWidth ?? 0 }),
+    createNumberField('Hauteur min', widget.size?.minHeight, (value) => updateSize('minHeight', value), { min: 0, max: widget.size?.maxHeight }),
+    createNumberField('Hauteur max', widget.size?.maxHeight, (value) => updateSize('maxHeight', value), { min: widget.size?.minHeight ?? 0 }),
   ];
   if (parentLayout.mode === 'free') {
     sizeAndPlacementFields.push(
@@ -396,9 +397,9 @@ function createWidgetProperties(widget, record) {
     );
   } else if (parentLayout.mode === 'grid') {
     sizeAndPlacementFields.push(
-      createNumberField('Colonne (0…, vide = auto)', widget.placement?.column, (value) => updatePlacement('column', value)),
-      createNumberField('Ligne (0…)', widget.placement?.row, (value) => updatePlacement('row', value)),
-      createNumberField('Étendue colonnes', widget.placement?.columnSpan, (value) => updatePlacement('columnSpan', value)),
+      createNumberField('Colonne (0…, vide = auto)', widget.placement?.column, (value) => updatePlacement('column', value), { min: 0, isInteger: true }),
+      createNumberField('Ligne (0…)', widget.placement?.row, (value) => updatePlacement('row', value), { min: 0, isInteger: true }),
+      createNumberField('Étendue colonnes', widget.placement?.columnSpan, (value) => updatePlacement('columnSpan', value), { min: 1, isInteger: true }),
     );
   }
   sections.push(createPanelSection('Taille et placement', sizeAndPlacementFields));

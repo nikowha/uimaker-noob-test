@@ -1,5 +1,16 @@
 // Catalogue des types de widgets, préréglages d'écran et valeurs par défaut (PROTOTYPE).
 
+import { limitNumber } from '../utils/numbers.js';
+
+/**
+ * Dernier index d'une liste (0 si elle est vide).
+ * @param {any[]|undefined} items liste
+ * @returns {number} index
+ */
+function lastIndex(items) {
+  return Math.max(0, (items ?? []).length - 1);
+}
+
 /** Préréglages de format d'écran (taille en pixels logiques, orientation de base). */
 export const SCREEN_PRESETS = [
   { key: '16:9', label: '16/9 — 1920×1080', width: 1920, height: 1080, platform: 'windows' },
@@ -74,10 +85,10 @@ export const WIDGET_TYPES = {
     label: 'Curseur', libraryIcon: 'sliders-horizontal',
     defaults: { name: 'Slider', content: { min: 0, max: 100, step: 1, value: 40, orientation: 'horizontal' }, size: { width: 'fill', height: 24 } },
     fields: [
-      { target: 'content', key: 'min', label: 'Min', kind: 'number' },
-      { target: 'content', key: 'max', label: 'Max', kind: 'number' },
-      { target: 'content', key: 'step', label: 'Pas', kind: 'number' },
-      { target: 'content', key: 'value', label: 'Valeur', kind: 'number' },
+      { target: 'content', key: 'min', label: 'Min', kind: 'number', getLimits: (content) => ({ max: content.max }) },
+      { target: 'content', key: 'max', label: 'Max', kind: 'number', getLimits: (content) => ({ min: content.min }) },
+      { target: 'content', key: 'step', label: 'Pas', kind: 'number', getLimits: (content) => ({ min: 0.001, max: content.max > content.min ? content.max - content.min : undefined }) },
+      { target: 'content', key: 'value', label: 'Valeur', kind: 'number', getLimits: (content) => ({ min: content.min, max: content.max }) },
       { target: 'content', key: 'orientation', label: 'Orientation', kind: 'select', options: ['horizontal', 'vertical'] },
     ],
   },
@@ -86,7 +97,7 @@ export const WIDGET_TYPES = {
     defaults: { name: 'Dropdown', content: { options: ['Option 1', 'Option 2'], selectedIndex: 0 }, size: { width: 'fill', height: 32 } },
     fields: [
       { target: 'content', key: 'options', label: 'Options (une par ligne)', kind: 'lines' },
-      { target: 'content', key: 'selectedIndex', label: 'Choisie (index)', kind: 'number' },
+      { target: 'content', key: 'selectedIndex', label: 'Choisie (index)', kind: 'number', isInteger: true, getLimits: (content) => ({ min: 0, max: lastIndex(content.options) }) },
     ],
   },
   list: {
@@ -95,7 +106,7 @@ export const WIDGET_TYPES = {
       size: { width: 'fill', height: 120 } },
     fields: [
       { target: 'content', key: 'items', label: 'Éléments (un par ligne)', kind: 'itemLines' },
-      { target: 'content', key: 'selectedIndex', label: 'Sélection (index, -1 = aucune)', kind: 'number' },
+      { target: 'content', key: 'selectedIndex', label: 'Sélection (index, -1 = aucune)', kind: 'number', isInteger: true, getLimits: (content) => ({ min: -1, max: (content.items ?? []).length - 1 }) },
       { target: 'content', key: 'controlsPageStack', label: 'Pilote la pile de pages', kind: 'pageStackRef' },
     ],
   },
@@ -111,7 +122,7 @@ export const WIDGET_TYPES = {
       { target: 'content', key: 'rows', label: 'Lignes (cellules séparées par |)', kind: 'tableRows' },
       { target: 'content', key: 'headerVisible', label: 'En-tête visible', kind: 'checkbox' },
       { target: 'content', key: 'striped', label: 'Lignes alternées', kind: 'checkbox' },
-      { target: 'content', key: 'selectedRow', label: 'Ligne sélectionnée (-1 = aucune)', kind: 'number' },
+      { target: 'content', key: 'selectedRow', label: 'Ligne sélectionnée (-1 = aucune)', kind: 'number', isInteger: true, getLimits: (content) => ({ min: -1, max: (content.rows ?? []).length - 1 }) },
     ],
   },
   icon: {
@@ -119,7 +130,7 @@ export const WIDGET_TYPES = {
     defaults: { name: 'Icon', content: { icon: 'lucide:star', size: 20 }, size: { width: 'hug', height: 'hug' } },
     fields: [
       { target: 'content', key: 'icon', label: 'Icône', kind: 'icon' },
-      { target: 'content', key: 'size', label: 'Taille', kind: 'number' },
+      { target: 'content', key: 'size', label: 'Taille', kind: 'number', min: 1 },
     ],
   },
   tabs: {
@@ -127,7 +138,7 @@ export const WIDGET_TYPES = {
     defaults: { name: 'Tabs', content: { tabs: [{ label: 'Tab 1', icon: '' }, { label: 'Tab 2', icon: '' }], selectedIndex: 0 }, size: { width: 'fill', height: 32 } },
     fields: [
       { target: 'content', key: 'tabs', label: 'Onglets (un par ligne)', kind: 'itemLines' },
-      { target: 'content', key: 'selectedIndex', label: 'Onglet actif (index)', kind: 'number' },
+      { target: 'content', key: 'selectedIndex', label: 'Onglet actif (index)', kind: 'number', isInteger: true, getLimits: (content) => ({ min: 0, max: lastIndex(content.tabs) }) },
       { target: 'content', key: 'controlsPageStack', label: 'Pilote la pile de pages', kind: 'pageStackRef' },
     ],
   },
@@ -173,11 +184,11 @@ export const WIDGET_TYPES = {
       itemSize: 40, itemMinSize: 0, crossSize: 'fill', gap: 4, positionSource: '', alternateEvery: 1 }, size: { width: 'fill', height: 60 } },
     fields: [
       { target: 'content', key: 'itemModuleId', label: 'Module répété', kind: 'moduleSelect' },
-      { target: 'content', key: 'previewCount', label: 'Nombre d\'exemple', kind: 'number', min: 0, max: 64 },
+      { target: 'content', key: 'previewCount', label: 'Nombre d\'exemple', kind: 'number', isInteger: true, getLimits: (content) => ({ min: Math.min(64, content.minCount ?? 0), max: Math.min(64, content.maxCount || 64) }) },
       { target: 'content', key: 'countVariableId', label: 'Relier à la variable', kind: 'numberVariable' },
       { target: 'content', key: 'countSource', label: 'Nombre dans l\'app (source)', kind: 'text', placeholder: 'ex. beat.steps' },
-      { target: 'content', key: 'minCount', label: 'Nombre min', kind: 'number', min: 0 },
-      { target: 'content', key: 'maxCount', label: 'Nombre max', kind: 'number', min: 0 },
+      { target: 'content', key: 'minCount', label: 'Nombre min', kind: 'number', isInteger: true, getLimits: (content) => ({ min: 0, max: content.maxCount || undefined }) },
+      { target: 'content', key: 'maxCount', label: 'Nombre max (0 = sans limite)', kind: 'number', min: 0, isInteger: true },
       { target: 'content', key: 'direction', label: 'Direction', kind: 'select', options: [{ value: 'horizontal', label: 'Horizontale' }, { value: 'vertical', label: 'Verticale' }] },
       { target: 'content', key: 'distribution', label: 'Placement', kind: 'select', options: [{ value: 'share', label: 'Se partager la place' }, { value: 'fixed', label: 'Taille fixe + défilement' },
         { value: 'wrap', label: 'Retour à la ligne' }, { value: 'position', label: 'Selon une position (temps…)' }] },
@@ -187,7 +198,7 @@ export const WIDGET_TYPES = {
       { target: 'content', key: 'gap', label: 'Espacement', kind: 'number', min: 0 },
       { target: 'content', key: 'positionSource', label: 'Position dans l\'app (source)', kind: 'text', placeholder: 'ex. step.start, step.duration' },
       { target: 'content', key: 'alternateColor', label: 'Fond alterné', kind: 'color' },
-      { target: 'content', key: 'alternateEvery', label: 'Alterner tous les', kind: 'number', min: 1 },
+      { target: 'content', key: 'alternateEvery', label: 'Alterner tous les', kind: 'number', min: 1, isInteger: true },
     ],
   },
   placeholder: {
@@ -200,6 +211,28 @@ export const WIDGET_TYPES = {
   },
 };
 
+/**
+ * Limites d'un paramètre numérique pour un widget (certaines dépendent des autres valeurs).
+ * @param {object} fieldDefinition définition du paramètre
+ * @param {object} widget widget
+ * @returns {{min?: number, max?: number}} limites
+ */
+export function getFieldLimits(fieldDefinition, widget) {
+  return fieldDefinition.getLimits?.(widget.content ?? {}) ?? { min: fieldDefinition.min, max: fieldDefinition.max };
+}
+
+/**
+ * Remet tous les paramètres numériques d'un widget dans leurs limites (ex. valeur d'un curseur quand son max baisse).
+ * @param {object} widget widget, modifié sur place
+ */
+export function limitWidgetNumbers(widget) {
+  for (const fieldDefinition of WIDGET_TYPES[widget.type]?.fields ?? []) {
+    const value = widget.content?.[fieldDefinition.key];
+    if (fieldDefinition.kind !== 'number' || typeof value !== 'number') continue;
+    widget.content[fieldDefinition.key] = limitNumber(value, { ...getFieldLimits(fieldDefinition, widget), isInteger: fieldDefinition.isInteger });
+  }
+}
+
 /** Champs d'apparence communs aux styles, aux areas et aux widgets. */
 export const APPEARANCE_FIELDS = [
   { key: 'background', label: 'Fond', kind: 'color' },
@@ -209,8 +242,8 @@ export const APPEARANCE_FIELDS = [
   { key: 'radius', label: 'Arrondi', kind: 'number', min: 0 },
   { key: 'fontSize', label: 'Taille du texte', kind: 'number', min: 1 },
   { key: 'fontWeight', label: 'Graisse', kind: 'select', options: ['', '400', '500', '600', '700'] },
-  { key: 'padding', label: 'Marges internes (h d b g)', kind: 'padding' },
-  { key: 'opacity', label: 'Opacité (0–1)', kind: 'number', step: 0.01, min: 0, max: 1 },
+  { key: 'padding', label: 'Marges internes', kind: 'padding' },
+  { key: 'opacity', label: 'Opacité (0–1)', kind: 'number', step: 0.01, min: 0, max: 1, emptyValue: 1 },
 ];
 
 /** Cibles possibles d'un style (appliesTo). */

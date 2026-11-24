@@ -1,5 +1,6 @@
 // Champs de formulaire des panneaux (PROTOTYPE). Chaque champ valide sa valeur sur « change ».
 import { createElement } from '../utils/dom.js';
+import { attachNumberLimits, limitNumber } from '../utils/numbers.js';
 import { resolveColor } from '../render/styleResolver.js';
 import { appSettings, appState, notifyChange, setHistoryGroup } from '../model/store.js';
 
@@ -25,7 +26,7 @@ function attachValueScrub(labelElement, inputElement, scrubOptions, onValue) {
   labelElement.addEventListener('pointerdown', (downEvent) => {
     downEvent.preventDefault();
     const startY = downEvent.clientY;
-    const startValue = Number(inputElement.value) || 0;
+    const startValue = inputElement.value === '' ? scrubOptions.emptyValue ?? 0 : Number(inputElement.value) || 0;
     let isScrubbing = false;
     let lastValue = startValue;
     labelElement.setPointerCapture(downEvent.pointerId);
@@ -96,18 +97,41 @@ export function createTextField(label, value, onCommit, fieldOptions = {}) {
  * @param {string} label libellé
  * @param {number|undefined} value valeur
  * @param {(newValue: number|undefined) => void} onCommit appelé à la validation
- * @param {{step?: number, min?: number, max?: number}} [scrubOptions] pas et bornes pour le réglage en glissant
+ * @param {{step?: number, min?: number, max?: number, isInteger?: boolean, emptyValue?: number}} [scrubOptions] pas, limites (frappe et glisser), départ du glissement si vide
  * @returns {HTMLElement} ligne
  */
 export function createNumberField(label, value, onCommit, scrubOptions = {}) {
-  const inputElement = createElement('input', {
-    attributes: { type: 'number', inputmode: 'decimal', step: 'any' },
-    on: { change: () => onCommit(inputElement.value === '' ? undefined : Number(inputElement.value)) },
-  });
+  const inputElement = createElement('input', { attributes: { type: 'number', inputmode: 'decimal', step: 'any' } });
+  attachNumberLimits(inputElement, scrubOptions);
+  inputElement.addEventListener('change', () => onCommit(inputElement.value === '' ? undefined : Number(inputElement.value)));
   inputElement.value = value ?? '';
   const fieldRow = createFieldRow(label, inputElement);
   attachValueScrub(fieldRow.querySelector('.field-label'), inputElement, scrubOptions, onCommit);
   return fieldRow;
+}
+
+const SIDE_LABELS = ['Haut', 'Droite', 'Bas', 'Gauche'];
+
+/**
+ * Quatre champs numériques pour les côtés (haut, droite, bas, gauche), plus un champ qui règle les quatre d'un coup.
+ * @param {string} label libellé
+ * @param {number[]|undefined} sideValues valeurs [haut, droite, bas, gauche], undefined = aucune valeur propre
+ * @param {(newValues: number[]|undefined) => void} onCommit appelé au changement (undefined = tout est vide)
+ * @returns {HTMLElement} groupe
+ */
+export function createSidesField(label, sideValues, onCommit) {
+  const limits = { min: 0 };
+  const values = Array.isArray(sideValues) ? sideValues : [];
+  const isSame = values.length === 4 && values.every((sideValue) => sideValue === values[0]);
+  const commitSide = (sideIndex, newValue) => {
+    const newValues = SIDE_LABELS.map((unusedLabel, index) => (index === sideIndex ? newValue : values[index]));
+    onCommit(newValues.every((sideValue) => sideValue === undefined) ? undefined : newValues.map((sideValue) => sideValue ?? 0));
+  };
+  return createElement('div', { className: 'sides-field' }, [
+    createElement('div', { className: 'field-label', text: label }),
+    createNumberField('Les 4', isSame ? values[0] : undefined, (newValue) => onCommit(newValue === undefined ? undefined : Array(4).fill(newValue)), limits),
+    ...SIDE_LABELS.map((sideLabel, sideIndex) => createNumberField(sideLabel, values[sideIndex], (newValue) => commitSide(sideIndex, newValue), limits)),
+  ]);
 }
 
 /**
@@ -185,18 +209,20 @@ export function createColorField(label, value, uiDocument, themeId, onCommit) {
  * @param {string} label libellé
  * @param {number|string|undefined} value valeur
  * @param {(newValue: number|string) => void} onCommit appelé au changement
+ * @param {{min?: number, max?: number}} [limits] limites de la taille fixe
  * @returns {HTMLElement} ligne
  */
-export function createSizeField(label, value, onCommit) {
+export function createSizeField(label, value, onCommit, limits = { min: 0 }) {
   const sizeMode = typeof value === 'number' ? 'fixed' : (value ?? 'hug');
-  const numberInput = createElement('input', { attributes: { type: 'number', inputmode: 'decimal' },
-    on: { change: () => onCommit(Number(numberInput.value) || 0) } });
+  const numberInput = createElement('input', { attributes: { type: 'number', inputmode: 'decimal' } });
+  attachNumberLimits(numberInput, limits);
+  numberInput.addEventListener('change', () => onCommit(limitNumber(Number(numberInput.value) || 0, limits)));
   numberInput.value = typeof value === 'number' ? value : '';
   const selectElement = createSelectElement(sizeMode, [
     { value: 'hug', label: 'Ajuster' }, { value: 'fill', label: 'Remplir' }, { value: 'fixed', label: 'Fixe' },
-  ], (modeValue) => onCommit(modeValue === 'fixed' ? (typeof value === 'number' ? value : 100) : modeValue));
+  ], (modeValue) => onCommit(modeValue === 'fixed' ? limitNumber(typeof value === 'number' ? value : 100, limits) : modeValue));
   const fieldRow = createFieldRow(label, createElement('span', { className: 'field-group' }, [selectElement, sizeMode === 'fixed' ? numberInput : null]));
-  if (sizeMode === 'fixed') attachValueScrub(fieldRow.querySelector('.field-label'), numberInput, { step: 1, min: 0 }, onCommit);
+  if (sizeMode === 'fixed') attachValueScrub(fieldRow.querySelector('.field-label'), numberInput, { step: 1, ...limits }, onCommit);
   return fieldRow;
 }
 

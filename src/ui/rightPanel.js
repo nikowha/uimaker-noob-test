@@ -256,8 +256,8 @@ function createVariablesView() {
       createTextField('Nom', variable.name, (name) => update((target) => { target.name = name.trim().replace(/[{}\s]+/g, '') || target.name; })),
       createSelectField('Type', variable.kind, VARIABLE_KINDS, (kind) => update((target) => setVariableKind(target, kind))),
       valueField,
-      ...(variable.kind === 'number' ? [createNumberField('Min', variable.min, (value) => update((target) => { if (value === undefined) delete target.min; else target.min = value; })),
-        createNumberField('Max', variable.max, (value) => update((target) => { if (value === undefined) delete target.max; else target.max = value; }))] : []),
+      ...(variable.kind === 'number' ? [createNumberField('Min', variable.min, (value) => update((target) => { if (value === undefined) delete target.min; else target.min = value; target.value = convertVariableValue(target, target.value); }), { max: variable.max }),
+        createNumberField('Max', variable.max, (value) => update((target) => { if (value === undefined) delete target.max; else target.max = value; target.value = convertVariableValue(target, target.value); }), { min: variable.min })] : []),
       createTextField('Description', variable.description, (description) => update((target) => { target.description = description; })),
       createElement('div', { className: 'panel-hint', text: `${variableId} · ${userCount} lien(s)` }),
       createButtonRow([{ label: 'Supprimer', isDanger: true, onClick: () => {

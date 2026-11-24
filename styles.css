@@ -361,3 +361,9 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .module-banner select { min-height: var(--touch-target); max-width: 170px; }
 .test-variable input:not([type="checkbox"]) { width: 64px; }
 .test-variable button { min-width: 32px; }
+
+/* ---- Marges : un champ par côté ---- */
+.sides-field { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin: 6px 0; }
+.sides-field > .field-label { grid-column: 1; align-self: center; }
+.sides-field .field-row { grid-template-columns: 46px 1fr; margin: 2px 0; }
+.sides-field .field-row .field-label { line-height: var(--touch-target); }

@@ -1,5 +1,6 @@
 // Éditeur d'action réutilisable (événements, éléments de menu, action du clic) et section « Événements » (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
+import { attachNumberLimits } from '../utils/numbers.js';
 import { appState } from '../model/store.js';
 import { buildNodeIndex } from '../model/document.js';
 import { ACTION_TYPES, EVENT_TRIGGERS } from '../model/interactions.js';
@@ -44,7 +45,10 @@ export function createActionEditor(action, onChange) {
   }
   if (currentAction.type === 'showPage') {
     const pageInput = createElement('input', { attributes: { type: 'number', min: '0', title: 'Index de la page (0 = première)', placeholder: 'page' },
-      on: { change: () => commitAction({ page: Number(pageInput.value) || 0 }) } });
+      on: {} });
+    const pageCount = buildNodeIndex(appState.uiDocument).get(currentAction.target)?.node.children?.length;
+    attachNumberLimits(pageInput, { min: 0, max: pageCount ? pageCount - 1 : undefined, isInteger: true });
+    pageInput.addEventListener('change', () => commitAction({ page: Number(pageInput.value) || 0 }));
     pageInput.value = currentAction.page ?? 0;
     controls.push(pageInput);
   }
