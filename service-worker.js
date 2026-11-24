@@ -7,7 +7,8 @@ self.addEventListener('activate', (activateEvent) => activateEvent.waitUntil(sel
 self.addEventListener('fetch', (fetchEvent) => {
   if (fetchEvent.request.method !== 'GET') return;
   fetchEvent.respondWith(
-    fetch(fetchEvent.request)
+    // « no-cache » : demande toujours au serveur si le fichier a changé (GitHub Pages le laisserait 10 min en cache).
+    fetch(fetchEvent.request, { cache: 'no-cache' })
       .then((networkResponse) => {
         const responseCopy = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(fetchEvent.request, responseCopy));

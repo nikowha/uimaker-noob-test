@@ -49,7 +49,7 @@ function startApplication() {
   renderAll();
   loadModuleLibrary().catch((error) => console.error('loadModuleLibrary', error));
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    navigator.serviceWorker.register('./service-worker.js').catch((error) => console.error('startApplication (service worker)', error));
+    navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' }).catch((error) => console.error('startApplication (service worker)', error));
   }
 }
 

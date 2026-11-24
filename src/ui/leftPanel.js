@@ -5,6 +5,7 @@ import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange
 import { ANCHORS, APPEARANCE_FIELDS, getFieldLimits, limitWidgetNumbers, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
 import { addModuleState, canRepeatModuleIn, countModuleInstances, deleteModuleState, getRepeatCount, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
+import { APP_VERSION } from '../version.js';
 import { getLibraryEntry } from '../io/moduleLibrary.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
@@ -732,6 +733,7 @@ function createAppSettingsView() {
     { key: 'snapDistance', label: 'Aimantation des bords d\x27areas (px, 0 = aucune)', min: 0, max: 40 },
   ];
   return [createPanelSection('Réglages de l\x27app', [
+    createInfoRow('Version', APP_VERSION),
     createElement('div', { className: 'panel-hint', text: 'Gardés dans cet appareil. Astuce : glisse sur un libellé souligné pour changer la valeur.' }),
     ...settingDefinitions.map((settingDefinition) => createNumberField(settingDefinition.label, appSettings[settingDefinition.key],
       (newValue) => updateAppSetting(settingDefinition.key, newValue), { step: 1, min: settingDefinition.min, max: settingDefinition.max })),
