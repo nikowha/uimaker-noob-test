@@ -74,7 +74,7 @@ export const appState = {
   areIdsVisible: true,
   copiedAppearance: null,
   leftPanelSection: 'properties',
-  parameterTab: 'look',      // onglet des paramètres de la sélection : look, properties ou interaction
+  parameterTab: 'properties', // onglet des paramètres de la sélection : properties, look ou interaction
   rightPanelSection: 'widgets',
 };
 

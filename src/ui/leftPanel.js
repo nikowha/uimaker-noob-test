@@ -24,8 +24,8 @@ const ALIGN_CHOICES = ['start', 'center', 'end', 'stretch', 'spaceBetween'];
 
 /** Onglets des paramètres de la sélection. */
 const PARAMETER_TABS = [
+  { value: 'properties', label: 'Propriétés', title: 'Nom, contenu, paramètres propres et notes' },
   { value: 'look', label: 'Apparence', title: 'Taille, placement et apparence' },
-  { value: 'properties', label: 'Propriétés', title: 'Contenu, paramètres propres et notes' },
   { value: 'interaction', label: 'Interaction', title: 'État, action et événements' },
 ];
 
@@ -172,11 +172,11 @@ function createNotesField(node) {
  */
 function createScreenProperties(screen) {
   const presetChoices = SCREEN_PRESETS.map((preset) => ({ value: preset.key, label: preset.label }));
-  return [createPanelSection('Écran', [
+  return [putInTab('properties', createPanelSection('Écran', [
     createInfoRow('ID', screen.id),
     createTextField('Nom (anglais)', screen.name, (newName) => updateNode(screen.id, (targetScreen) => { targetScreen.name = newName.trim() || targetScreen.name; })),
     createButtonRow([{ label: 'Supprimer l\'écran', isDanger: true, onClick: deleteSelection }]),
-  ]), putInTab('look', createPanelSection('Format et taille', [
+  ])), putInTab('look', createPanelSection('Format et taille', [
     createSelectField('Format', screen.preset, presetChoices, (presetKey) => updateNode(screen.id, (targetScreen) => {
       const preset = SCREEN_PRESETS.find((candidate) => candidate.key === presetKey);
       const isPortrait = targetScreen.orientation === 'portrait';
@@ -217,7 +217,7 @@ function createAreaProperties(area, record) {
     setOrDeleteValue(targetArea.sizing, key, value);
     if (typeof targetArea.sizing.size === 'number') targetArea.sizing.size = limitNumber(targetArea.sizing.size, targetArea.sizing);
   });
-  const sections = [createPanelSection('Area', [
+  const sections = [putInTab('properties', createPanelSection('Area', [
     ...createIdentityFields(area),
     createButtonRow([
       { label: 'Diviser ⇆', title: 'Découper en deux, côte à côte', onClick: () => splitSelectedArea('horizontal') },
@@ -230,7 +230,7 @@ function createAreaProperties(area, record) {
       ? { label: 'Détacher', title: 'Remplace l\'instance par une copie modifiable', onClick: () => detachInstance(area.id) }
       : { label: '→ Module', title: 'Enregistre cette area et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(area.id) }]),
     area.split ? createInfoRow('Découpage', area.split === 'horizontal' ? 'côte à côte' : 'empilé') : null,
-  ])];
+  ]))];
   if (record.parent) {
     sections.push(putInTab('look', createPanelSection('Taille dans le découpage', [
       createSelectField('Mode', sizing.mode, SIZING_MODES, (mode) => updateSizing('mode', mode)),
@@ -409,7 +409,7 @@ function createWidgetProperties(widget, record) {
   const typeLabel = widget.type === 'moduleInstance'
     ? `Module ${widget.moduleId} · ${appState.uiDocument.modules[widget.moduleId]?.name ?? '?'}`
     : typeDefinition?.label ?? widget.type;
-  const sections = [createPanelSection(typeLabel, [
+  const sections = [putInTab('properties', createPanelSection(typeLabel, [
     ...createIdentityFields(widget),
     widget.type === 'moduleInstance' ? createModuleButtonRow(widget.moduleId) : null,
     isModuleRoot ? null : createButtonRow([
@@ -419,7 +419,7 @@ function createWidgetProperties(widget, record) {
         : { label: '→ Module', title: 'Enregistre ce widget et son contenu comme module (projet + bibliothèque)', onClick: () => saveAsModule(widget.id) },
       { label: 'Supprimer', isDanger: true, onClick: deleteSelection },
     ]),
-  ].filter(Boolean))];
+  ].filter(Boolean)))];
   if (widget.type === 'moduleInstance') sections.push(...createInstanceStateSection(widget, (mutateNode) => updateNode(widget.id, mutateNode)));
   if (typeDefinition?.fields.length) sections.push(putInTab('properties', createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition)))));
   const sizeAndPlacementFields = [
@@ -450,7 +450,7 @@ function createWidgetProperties(widget, record) {
       createButtonRow([{ label: '+ Page', onClick: () => addPageToStack(widget.id) }]),
     ])));
   }
-  if (widget.children && widget.type !== 'pageStack') sections.push(putInTab('look', createWidgetLayoutSection(widget)));
+  if (widget.children && widget.type !== 'pageStack') sections.push(putInTab('properties', createWidgetLayoutSection(widget)));
   sections.push(putInTab('interaction', createPanelSection('État et action', [
     createCheckboxField('Actif', widget.state?.enabled !== false, (isEnabled) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.enabled = isEnabled; })),
     createCheckboxField('Visible', widget.state?.visible !== false, (isVisible) => updateNode(widget.id, (targetWidget) => { targetWidget.state ??= {}; targetWidget.state.visible = isVisible; })),
@@ -546,8 +546,8 @@ function createStateProperties() {
     if (selectedId) innerNodeKeyByInstance.set(instance.id, selectedId);
   }
   const updateState = (mutateState) => updateNode(editedModuleId, (targetModule) => mutateState(targetModule.states.find((candidate) => candidate.id === editedStateId)));
-  return [createPanelSection('État', [createInfoRow('ID', state.id), createInfoRow('Nom', state.name), createInfoRow('Quand ?', state.description || '—'),
-    createButtonRow([{ label: 'Revenir à Normal', onClick: () => { appState.editedStateId = null; selectNode(editedModuleId); } }])]),
+  return [putInTab('properties', createPanelSection('État', [createInfoRow('ID', state.id), createInfoRow('Nom', state.name), createInfoRow('Quand ?', state.description || '—'),
+    createButtonRow([{ label: 'Revenir à Normal', onClick: () => { appState.editedStateId = null; selectNode(editedModuleId); } }])])),
   ...createInstanceSettingsSections(instance, updateState, 'Ce que change cet état', true)];
 }
 
