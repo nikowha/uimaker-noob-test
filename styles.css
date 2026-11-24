@@ -367,3 +367,8 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .sides-field > .field-label { grid-column: 1; align-self: center; }
 .sides-field .field-row { grid-template-columns: 46px 1fr; margin: 2px 0; }
 .sides-field .field-row .field-label { line-height: var(--touch-target); }
+
+/* ---- Onglets des paramètres ---- */
+.parameter-tabs { position: sticky; top: -6px; z-index: 5; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 0 -8px; padding: 6px 8px 4px; background: var(--editor-panel); border-bottom: 1px solid var(--editor-border); }
+.parameter-tabs button { min-width: 0; min-height: var(--touch-target); padding: 0 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.parameter-tabs button.is-active { background: var(--editor-accent); border-color: var(--editor-accent); color: #fff; font-weight: 600; }

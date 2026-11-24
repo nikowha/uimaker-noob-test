@@ -103,6 +103,6 @@ export function createEventsSection(node, isScreen, updateThisNode) {
     createButtonRow([{ label: '+ Événement', onClick: () => updateThisNode((targetNode) => {
       (targetNode.events ??= []).push({ trigger: isScreen ? 'pencilDoubleTap' : 'rightClick', action: { type: 'none' } });
     }) }]),
-  ], false);
+  ]);
 }
 
