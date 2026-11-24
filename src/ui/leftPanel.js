@@ -267,6 +267,7 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
     case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0));
     case 'select': return createSelectField(fieldDefinition.label, currentValue, fieldDefinition.options, commitValue);
     case 'checkbox': return createCheckboxField(fieldDefinition.label, currentValue, commitValue);
+    case 'color': return createColorField(fieldDefinition.label, currentValue, appState.uiDocument, appState.currentThemeId, commitValue);
     case 'rawColor': {
       const colorInput = createElement('input', { attributes: { type: 'color' }, on: { change: () => commitValue(colorInput.value) } });
       colorInput.value = currentValue ?? '#5B6B8C';

@@ -101,6 +101,7 @@ export function renderTopBar() {
       () => { appState.areIdsVisible = !appState.areIdsVisible; notifyChange(); }, appState.areIdsVisible ? 'ID' : 'ID off'),
     createElement('span', { className: 'top-spacer' }),
     createToolbarButton('play', 'Tester l\'UI (plein écran, manipulable, sans modifier le projet)', openTestMode, 'Tester'),
+    createToolbarButton('circle-question-mark', 'Aide : paramètres des widgets et des areas (nouvel onglet)', () => window.open('./help.html', '_blank')),
     createToolbarButton('file-plus', 'Nouveau projet', startNewProject),
     createToolbarButton('file-down', 'Importer un ui.json', importUiSpec, 'Importer'),
     createToolbarButton('file-up', 'Exporter ui.json (spec UI pour une autre session)', exportUiSpec, 'Exporter'),

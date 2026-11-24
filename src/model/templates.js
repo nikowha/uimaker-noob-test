@@ -2,6 +2,7 @@
 // Chaque modèle fabrique ses éléments avec de nouveaux ID (aucun ID partagé avec le projet).
 import { WIDGET_TYPES } from './catalog.js';
 import { createId, createLeafArea, createPage, createScreen, createWidget } from './document.js';
+import { createModuleInstance, saveNodeAsModule } from './modules.js';
 
 /**
  * Crée un widget du catalogue et fusionne des valeurs (content et state fusionnés, le reste remplacé).
@@ -172,6 +173,179 @@ function buildSettingsWindow(uiDocument) {
             buildWidget(uiDocument, 'button', { name: 'SaveButton', content: { label: 'Save' } })] }),
       ]),
     ]), { platform: 'macos', size: { width: 900, height: 600 } });
+}
+
+const SEQUENCER_COLORS = { background: '#121316', panel: '#1B1D22', raised: '#262930', muted: '#8B909A', border: '#33363E', accent: '#F2D24B',
+  mute: '#D9534F', solo: '#4FA3D9', tweak: '#4FC3F7', play: '#2F6F3A', stop: '#8A2F2F', darkBeat: '#1F1F1F', lightBeat: '#383838' };
+const SEQUENCER_HEADER_WIDTH = 210;
+const SEQUENCER_BEAT_COUNT = 4;
+const SEQUENCER_STEPS_PER_BEAT = 4;
+/** Pistes de chaque machine : [nom, pas allumés (1 à 16) pour l'exemple]. */
+const SEQUENCER_TRACKS = {
+  808: [['Bass Drum', [1, 7, 9]], ['Snare', [5, 13]], ['Low Tom', []], ['Mid Tom', []], ['Hi Tom', [15]], ['Rim Shot', []], ['Clap', [13]],
+    ['Cowbell', [4, 12]], ['Cymbal', []], ['Open Hat', [11]], ['Closed Hat', [1, 3, 5, 7, 9, 13, 15]]],
+  909: [['Bass Drum', [1, 5, 9, 13]], ['Snare', [5, 13]], ['Low Tom', []], ['Mid Tom', []], ['Hi Tom', []], ['Rim Shot', [4]], ['Clap', [5, 13]],
+    ['Closed Hat', [1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16]], ['Open Hat', [3, 7, 11, 15]], ['Crash', [1]], ['Ride', []]],
+};
+
+/**
+ * Conteneur sans bord, en pile.
+ * @param {object} uiDocument document
+ * @param {string} name nom
+ * @param {'horizontal'|'vertical'} direction sens
+ * @param {object} size taille
+ * @param {object[]} children widgets
+ * @param {object} [layoutValues] autres réglages de placement
+ * @param {object} [styleOverrides] apparence
+ * @returns {object} conteneur
+ */
+function buildPlainStack(uiDocument, name, direction, size, children, layoutValues = {}, styleOverrides = {}) {
+  return buildWidget(uiDocument, 'container', { name, size, children, styleOverrides: { borderWidth: 0, radius: 0, ...styleOverrides },
+    widgetLayout: { mode: 'stack', direction, gap: 6, padding: [0, 0, 0, 0], alignMain: 'start', alignCross: direction === 'horizontal' ? 'center' : 'stretch', ...layoutValues } });
+}
+
+/**
+ * Bouton à deux états (case à cocher affichée comme un bouton).
+ * @param {object} uiDocument document
+ * @param {string} name nom
+ * @param {string} label texte
+ * @param {object} size taille
+ * @param {string} checkedColor couleur allumée
+ * @param {object} [styleOverrides] apparence éteinte
+ * @param {boolean} [isChecked] état de départ
+ * @returns {object} widget
+ */
+function buildToggleButton(uiDocument, name, label, size, checkedColor, styleOverrides = {}, isChecked = false) {
+  return buildWidget(uiDocument, 'checkbox', { name, content: { label, appearance: 'button', checkedColor }, state: { checked: isChecked }, size,
+    styleOverrides: { background: SEQUENCER_COLORS.raised, ...styleOverrides } });
+}
+
+/**
+ * Crée le module « ligne de pas » : sélection, nom, M / S / T et 16 pas rangés par temps.
+ * @param {object} uiDocument document
+ * @returns {string} ID du module
+ */
+function createStepRowModule(uiDocument) {
+  const squareButton = { width: 30, height: 32 };
+  const header = buildPlainStack(uiDocument, 'TrackHeader', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [
+    buildToggleButton(uiDocument, 'SelectTrack', '', { width: 18, height: 18 }, SEQUENCER_COLORS.accent, { radius: 9, borderWidth: 2, borderColor: SEQUENCER_COLORS.muted }),
+    buildWidget(uiDocument, 'button', { name: 'TrackName', content: { label: 'Track' }, size: { width: 'fill', height: 32 },
+      styleOverrides: { background: SEQUENCER_COLORS.panel, padding: [0, 2, 0, 2], fontWeight: '400' }, notes: 'Touche = sélectionne la piste et joue son son.',
+      action: { type: 'custom', description: 'Sélectionne la piste et joue son son' } }),
+    buildToggleButton(uiDocument, 'MuteTrack', 'M', squareButton, SEQUENCER_COLORS.mute, { fontWeight: '700' }),
+    buildToggleButton(uiDocument, 'SoloTrack', 'S', squareButton, SEQUENCER_COLORS.solo, { fontWeight: '700' }),
+    buildToggleButton(uiDocument, 'TweakTrack', 'T', squareButton, SEQUENCER_COLORS.tweak, { fontWeight: '700' }),
+  ], { gap: 4, padding: [0, 6, 0, 8] }, { background: SEQUENCER_COLORS.panel });
+  header.children.at(-1).notes = 'Ouvre la ligne de réglages de la piste sous cette ligne (à coder).';
+  header.children[0].notes = 'Une seule piste sélectionnée à la fois (à coder).';
+  const beats = Array.from({ length: SEQUENCER_BEAT_COUNT }, (unusedBeat, beatIndex) => buildPlainStack(uiDocument, `Beat${beatIndex + 1}`, 'horizontal', { width: 'fill', height: 'fill' },
+    Array.from({ length: SEQUENCER_STEPS_PER_BEAT }, (unusedStep, stepIndex) => buildToggleButton(uiDocument, `Step${String(beatIndex * SEQUENCER_STEPS_PER_BEAT + stepIndex + 1).padStart(2, '0')}`, '',
+      { width: 'fill', height: 'fill' }, SEQUENCER_COLORS.accent,
+      { background: beatIndex % 2 ? SEQUENCER_COLORS.lightBeat : SEQUENCER_COLORS.darkBeat, borderWidth: 1, borderColor: SEQUENCER_COLORS.border })),
+    { gap: 6, padding: [3, 3, 3, 3], alignCross: 'stretch' }));
+  const row = buildPlainStack(uiDocument, 'StepTrackRow', 'horizontal', { width: 'fill', height: 'fill' }, [header, ...beats], { gap: 0, alignCross: 'stretch' });
+  const moduleId = saveNodeAsModule(uiDocument, row);
+  Object.assign(uiDocument.modules[moduleId], { previewSize: { width: 900, height: 110 }, notes: 'Une piste du séquenceur. Chaque instance règle TrackName et les pas allumés (Step01 à Step16, state.checked).' });
+  uiDocument.modules[moduleId].root.size = { width: 'fill', height: 44 };
+  return moduleId;
+}
+
+/**
+ * Crée une ligne du séquenceur : instance du module avec son nom et ses pas allumés.
+ * @param {object} uiDocument document
+ * @param {string} moduleId module de ligne
+ * @param {string} trackName nom affiché
+ * @param {number[]} activeSteps pas allumés (1 à 16)
+ * @param {boolean} isSelected piste sélectionnée
+ * @returns {object} instance
+ */
+function buildStepRow(uiDocument, moduleId, trackName, activeSteps, isSelected) {
+  const moduleRoot = uiDocument.modules[moduleId].root;
+  const instance = createModuleInstance(uiDocument, moduleId);
+  Object.assign(instance, { name: `${trackName.replace(/\s+/g, '')}Row`, size: { width: 'fill', height: 'fill' } });
+  instance.overrides[findWidgetByName(moduleRoot, 'TrackName').id] = { content: { label: trackName } };
+  for (const stepNumber of activeSteps) instance.overrides[findWidgetByName(moduleRoot, `Step${String(stepNumber).padStart(2, '0')}`).id] = { state: { checked: true } };
+  if (isSelected) instance.overrides[findWidgetByName(moduleRoot, 'SelectTrack').id] = { state: { checked: true } };
+  return instance;
+}
+
+/**
+ * Écran de séquenceur à pas, inspiré du projet STEP_SEQUENCER : barre du haut, pistes 808 / 909, outils, navigation.
+ * Chaque ligne de pas est une instance du même module. Les onglets pilotent des piles de pages.
+ * @param {object} uiDocument document
+ * @returns {object} écran
+ */
+function buildStepSequencer(uiDocument) {
+  const { raised, panel, muted, accent, background, border } = SEQUENCER_COLORS;
+  const caption = (name, text, size) => buildWidget(uiDocument, 'text', { name, content: { text, textRole: 'caption' }, size: size ?? { width: 'hug', height: 'hug' }, styleOverrides: { textColor: muted } });
+  const button = (name, label, size, styleOverrides = {}) => buildWidget(uiDocument, 'button', { name, content: { label }, size,
+    styleOverrides: { background: raised, padding: [0, 4, 0, 4], fontWeight: '400', ...styleOverrides }, action: { type: 'custom', description: label } });
+  const toolButton = (name, label, styleOverrides) => button(name, label, { width: 'fill', height: 34 }, styleOverrides);
+  const stepper = (prefix, value) => [button(`${prefix}Minus`, '−', { width: 28, height: 32 }),
+    buildWidget(uiDocument, 'textField', { name: `${prefix}Field`, content: { value, placeholder: '', inputKind: 'number' }, size: { width: 46, height: 32 } }),
+    button(`${prefix}Plus`, '+', { width: 28, height: 32 })];
+  const moduleId = createStepRowModule(uiDocument);
+
+  const machinePages = buildWidget(uiDocument, 'pageStack', { name: 'MachinePages', size: { width: 'fill', height: 'fill' } });
+  machinePages.children = Object.entries(SEQUENCER_TRACKS).map(([machineName, tracks]) => {
+    const page = buildPage(uiDocument, `Page${machineName}`, tracks.map(([trackName, activeSteps], trackIndex) => buildStepRow(uiDocument, moduleId, trackName, activeSteps, trackIndex === 0)));
+    page.widgetLayout.gap = 0;
+    return page;
+  });
+  const patternPage = buildPage(uiDocument, 'PatternPage', [
+    buildPlainStack(uiDocument, 'GridHeader', 'horizontal', { width: 'fill', height: 44 }, [
+      buildPlainStack(uiDocument, 'TrackListHeader', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [caption('TracksLabel', 'TRACKS'), caption('SwingLabel', 'Swing'),
+        buildWidget(uiDocument, 'slider', { name: 'TrackSwingSlider', content: { value: 0 }, size: { width: 'fill', height: 24 } })], { padding: [0, 8, 0, 8] }, { background: panel }),
+      buildWidget(uiDocument, 'tabs', { name: 'MachineTabs', size: { width: 'fill', height: 38 }, content: { tabs: [{ label: '808', icon: '' }, { label: '909', icon: '' }], controlsPageStack: machinePages.id } }),
+    ], { gap: 0 }),
+    buildPlainStack(uiDocument, 'BeatRuler', 'horizontal', { width: 'fill', height: 26 }, [
+      buildPlainStack(uiDocument, 'RulerSpacer', 'horizontal', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [], {}, { background: panel }),
+      ...Array.from({ length: SEQUENCER_BEAT_COUNT }, (unusedBeat, beatIndex) => buildPlainStack(uiDocument, `RulerBeat${beatIndex + 1}`, 'horizontal', { width: 'fill', height: 'fill' },
+        [caption(`BeatLabel${beatIndex + 1}`, String(beatIndex + 1))], { padding: [0, 0, 0, 6] })),
+    ], { gap: 0, alignCross: 'stretch' }),
+    machinePages,
+    buildPlainStack(uiDocument, 'NavigationBar', 'horizontal', { width: 'fill', height: 92 }, [
+      buildPlainStack(uiDocument, 'NavigationOptions', 'vertical', { width: SEQUENCER_HEADER_WIDTH, height: 'fill' }, [caption('NavigationLabel', 'NAVIGATION OPTIONS'),
+        buildWidget(uiDocument, 'dropdown', { name: 'SnapDropdown', content: { options: ['Step', 'Beat', '2 Beats', 'Pattern'], selectedIndex: 1 } })], { padding: [8, 8, 8, 8] }, { background: panel }),
+      buildWidget(uiDocument, 'placeholder', { name: 'PatternOverview', displayColor: '#565A63', size: { width: 'fill', height: 'fill' },
+        content: { description: 'Aperçu de tout le pattern, avec un rectangle de navigation à déplacer et à étirer' } }),
+    ], { gap: 0, alignCross: 'stretch' }),
+  ]);
+  patternPage.widgetLayout.gap = 0;
+  const modePages = buildWidget(uiDocument, 'pageStack', { name: 'ModePages' });
+  modePages.children = [patternPage,
+    buildPage(uiDocument, 'SongPage', [buildWidget(uiDocument, 'placeholder', { name: 'SongEditor', content: { description: 'Enchaînement des patterns' } })]),
+    buildPage(uiDocument, 'SoundPage', [buildWidget(uiDocument, 'placeholder', { name: 'SoundEditor', content: { description: 'Réglages des sons de la 808 et de la 909' } })])];
+
+  const topWidgets = [
+    caption('TempoLabel', 'Tempo'), ...stepper('Tempo', '120'), caption('SignatureLabel', 'Mesure'),
+    buildWidget(uiDocument, 'dropdown', { name: 'TimeSignatureDropdown', content: { options: ['4/4', '3/4', '6/8', 'Custom…'] }, size: { width: 90, height: 32 } }),
+    buildWidget(uiDocument, 'separator', { name: 'SelectSeparator', content: { orientation: 'vertical' }, size: { width: 1, height: 32 } }), caption('SelectLabel', 'Select'),
+    ...['Pattern', 'Line', 'Beat', 'Half', 'Step'].map((scopeName) => buildToggleButton(uiDocument, `Select${scopeName}`, scopeName, { width: scopeName === 'Pattern' ? 64 : 48, height: 32 }, '#7A6A20')),
+    caption('BarsLabel', 'Mesures'), ...stepper('Bars', '1'),
+    buildPlainStack(uiDocument, 'TopSpacer', 'horizontal', { width: 'fill', height: 1 }, []),
+    buildWidget(uiDocument, 'tabs', { name: 'ModeTabs', size: { width: 'hug', height: 36 }, content: { tabs: ['Pattern', 'Song', 'Son'].map((label) => ({ label, icon: '' })), controlsPageStack: modePages.id } }),
+  ];
+  const toolWidgets = [caption('ToolsLabel', 'OUTILS'), toolButton('CopyButton', 'Copier'), toolButton('PasteButton', 'Coller'), toolButton('ShiftLeftButton', 'Décaler ←'), toolButton('ShiftRightButton', 'Décaler →'),
+    toolButton('ClearButton', 'Effacer'), toolButton('ClearAllButton', 'Effacer tout', { borderWidth: 1, borderColor: SEQUENCER_COLORS.stop, textColor: '#FFB3B3' }),
+    buildPlainStack(uiDocument, 'ToolsSpacerTop', 'vertical', { width: 'fill', height: 'fill' }, []),
+    Object.assign(buildToggleButton(uiDocument, 'PlayButton', '▶ Play', { width: 'fill', height: 88 }, SEQUENCER_COLORS.stop, { background: SEQUENCER_COLORS.play, radius: 10, fontSize: 18, fontWeight: '700' }),
+      { notes: 'Allumé = lecture en cours, le texte devient « ■ Stop » (à coder).' }),
+    buildToggleButton(uiDocument, 'TupletButton', 'Tuplet', { width: 'fill', height: 34 }, SEQUENCER_COLORS.tweak),
+    caption('PatternSwingLabel', 'Swing'), buildWidget(uiDocument, 'dropdown', { name: 'SwingDropdown', content: { options: ['50%', '54%', '58%', '62%', '66%'] } }),
+    buildWidget(uiDocument, 'slider', { name: 'SwingSlider', content: { min: 50, max: 75, value: 50 } }),
+    buildWidget(uiDocument, 'dropdown', { name: 'SwingPairsDropdown', content: { options: ['1/16', '1/8'] } }),
+    buildPlainStack(uiDocument, 'ToolsSpacerBottom', 'vertical', { width: 'fill', height: 'fill' }, []),
+    buildWidget(uiDocument, 'button', { name: 'SettingsButton', content: { label: 'Settings', icon: 'lucide:settings' }, size: { width: 'fill', height: 44 },
+      styleOverrides: { background: raised, padding: [0, 4, 0, 4], fontWeight: '400' }, action: { type: 'custom', description: 'Ouvre les réglages' } })];
+  const panelLook = { styleOverrides: { background: panel, borderWidth: 1, borderColor: border } };
+  return buildScreen(uiDocument, 'ipad', 'StepSequencerScreen', () => buildSplitArea(uiDocument, 'Root', 'vertical', null, [
+    buildLeafArea(uiDocument, 'TopBarArea', { mode: 'fixed', size: 52 }, { ...HORIZONTAL_BAR, gap: 6, padding: [0, 12, 0, 12] }, topWidgets, panelLook),
+    buildSplitArea(uiDocument, 'MainArea', 'horizontal', { mode: 'fill' }, [
+      buildLeafArea(uiDocument, 'EditorArea', { mode: 'fill' }, { ...VERTICAL_STACK, gap: 0, padding: [0, 0, 0, 0] }, [modePages], { styleOverrides: { background } }),
+      buildLeafArea(uiDocument, 'ToolsArea', { mode: 'fixed', size: 120 }, { ...VERTICAL_STACK, padding: [8, 8, 8, 8] }, toolWidgets, panelLook),
+    ]),
+  ]), { notes: `Séquenceur à pas inspiré du projet STEP_SEQUENCER. Chaque ligne est une instance du module ${moduleId}. Les outils de droite dépendent du mode (à coder). Accent : ${accent}.` });
 }
 
 /**
@@ -395,6 +569,7 @@ const SCREEN_TEMPLATES = {
           content: { tabs: [{ label: 'Home', icon: 'lucide:house' }, { label: 'Search', icon: 'lucide:search' }, { label: 'Profile', icon: 'lucide:user' }] } }),
       ], { styleOverrides: PANEL_LOOK }),
     ])) },
+  stepSequencer: { label: 'iPad : séquenceur à pas (ligne = module)', icon: 'drum', build: buildStepSequencer },
   allWidgets: { label: 'Tous les widgets (grille)', icon: 'layout-grid', build: (uiDocument) => buildScreen(uiDocument, '16:9-small', 'AllWidgetsScreen',
     () => buildLeafArea(uiDocument, 'Root', { mode: 'fill' }, { mode: 'grid', columns: ['1fr', '1fr', '1fr', '1fr'], gap: 16, padding: [16, 16, 16, 16] },
       Object.keys(WIDGET_TYPES).map((widgetType) => {

@@ -54,10 +54,12 @@ export const WIDGET_TYPES = {
   },
   checkbox: {
     label: 'Case à cocher', libraryIcon: 'square-check',
-    defaults: { name: 'Checkbox', content: { label: 'Option' }, state: { checked: true }, size: { width: 'hug', height: 24 } },
+    defaults: { name: 'Checkbox', content: { label: 'Option', appearance: 'box' }, state: { checked: true }, size: { width: 'hug', height: 24 } },
     fields: [
       { target: 'content', key: 'label', label: 'Texte', kind: 'text' },
       { target: 'state', key: 'checked', label: 'Cochée', kind: 'checkbox' },
+      { target: 'content', key: 'appearance', label: 'Affichage', kind: 'select', options: ['box', 'button'] },
+      { target: 'content', key: 'checkedColor', label: 'Couleur cochée', kind: 'color' },
     ],
   },
   toggle: {

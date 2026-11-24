@@ -55,8 +55,8 @@ const WIDGET_CONTENT_BUILDERS = {
     return [inputKind === 'search' ? createIconElement('lucide:search', 14) : null,
       createElement('span', { className: value ? '' : 'uiw-muted', text: shownText ?? '' })];
   },
-  checkbox: (widget) => [createElement('span', { className: `uiw-check-box${widget.state?.checked ? ' is-on' : ''}`,
-    html: widget.state?.checked ? getIconSvg('lucide:check') : '' }), createElement('span', { text: widget.content?.label ?? '' })],
+  checkbox: (widget) => (widget.content?.appearance === 'button' ? [createElement('span', { text: widget.content?.label ?? '' })] : [createElement('span', { className: `uiw-check-box${widget.state?.checked ? ' is-on' : ''}`,
+    html: widget.state?.checked ? getIconSvg('lucide:check') : '' }), createElement('span', { text: widget.content?.label ?? '' })]),
   toggle: (widget) => [createElement('span', { className: `uiw-toggle-track${widget.state?.on ? ' is-on' : ''}` },
     [createElement('span', { className: 'uiw-toggle-thumb' })]), createElement('span', { text: widget.content?.label ?? '' })],
   slider: (widget) => {

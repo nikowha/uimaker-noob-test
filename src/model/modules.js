@@ -4,7 +4,7 @@ import { buildNodeIndex, cloneJson, cloneSubtreeWithNewIds, collectSubtreeNodeId
 
 export const MODULE_LIBRARY_FORMAT = 'uimaker-noob-modules';
 export const MODULE_LIBRARY_FORMAT_VERSION = '0.1';
-const COLOR_KEYS = new Set(['background', 'textColor', 'borderColor']);
+const COLOR_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor']);
 
 /**
  * Enregistre un widget ou une area (avec son contenu) comme module du projet. L'original ne change pas.

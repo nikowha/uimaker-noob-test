@@ -65,7 +65,7 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .project-name { width: 130px; }
 .top-separator { width: 1px; align-self: stretch; margin: 10px 2px; background: var(--editor-border); }
 .top-spacer { flex: 1; }
-.top-button { display: inline-flex; align-items: center; gap: 4px; min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; white-space: nowrap; }
+.top-button { flex: none; display: inline-flex; align-items: center; gap: 4px; min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; white-space: nowrap; }
 .top-button-icon svg, .icon-preview svg { width: 18px; height: 18px; display: block; }
 
 /* ---- Fenêtres latérales ---- */
@@ -168,6 +168,7 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .uiw-checkbox, .uiw-toggle { white-space: nowrap; }
 .uiw-check-box { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--ui-border, #6a6e78); display: inline-flex; color: #fff; flex: none; }
 .uiw-check-box.is-on { background: var(--ui-accent, #4c8dff); border-color: transparent; }
+.uiw-checkbox.is-button { justify-content: center; border-radius: 6px; background: var(--ui-surface, #26282e); overflow: hidden; }
 .uiw-check-box svg { width: 100%; height: 100%; }
 .uiw-toggle-track { position: relative; width: 34px; height: 20px; border-radius: 10px; background: var(--ui-border, #3a3d45); flex: none; }
 .uiw-toggle-track.is-on { background: var(--ui-accent, #4c8dff); }
@@ -297,8 +298,9 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 /* Écrans plus étroits (iPad 11" en paysage) */
 @media (max-width: 1200px) {
   :root { --side-panel-width: 248px; }
-  .top-bar select { max-width: 140px; }
+  .top-bar select { max-width: 105px; }
   .project-name { width: 100px; }
+  .app-title { display: none; }
 }
 
 /* ---- Événements, actions, menus (éditeur) ---- */

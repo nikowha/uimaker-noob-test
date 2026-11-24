@@ -1,7 +1,7 @@
 // Rendu d'un écran : areas découpées, placement des widgets, apparence, thème (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
 import { resolveInstanceRoot } from '../model/modules.js';
-import { applyAppearanceToElement, applyThemeVariables, resolveAppearance } from './styleResolver.js';
+import { applyAppearanceToElement, applyThemeVariables, resolveAppearance, resolveColor } from './styleResolver.js';
 import { fillWidgetContent } from './widgetRenderer.js';
 
 const ALIGN_TO_CSS = { start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch', spaceBetween: 'space-between' };
@@ -158,6 +158,20 @@ export function renderScreen(uiDocument, screen, renderOptions) {
   };
 
   /**
+   * Applique la couleur « cochée » d'une case : sur la case, ou sur tout le widget s'il s'affiche comme un bouton.
+   * @param {HTMLElement} widgetElement élément
+   * @param {object} widget case à cocher
+   */
+  const applyCheckedColor = (widgetElement, widget) => {
+    const isButton = widget.content?.appearance === 'button';
+    if (isButton) widgetElement.classList.add('is-button');
+    if (!widget.state?.checked) return;
+    const checkedColor = widget.content?.checkedColor ? resolveColor(uiDocument, widget.content.checkedColor, themeId) : null;
+    if (isButton) widgetElement.style.background = checkedColor ?? 'var(--ui-accent, #4c8dff)';
+    else if (checkedColor) widgetElement.querySelector('.uiw-check-box').style.background = checkedColor;
+  };
+
+  /**
    * Rend un widget (et ses enfants s'il est conteneur).
    * @param {object} widget widget
    * @param {object} parentLayout placement du parent
@@ -193,6 +207,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       });
     } else {
       fillWidgetContent(widgetElement, renderedWidget);
+      if (renderedWidget.type === 'checkbox') applyCheckedColor(widgetElement, renderedWidget);
     }
     applyWidgetSizing(widgetElement, renderedWidget, parentLayout);
     if (parentLayout?.mode === 'free') applyFreePlacement(widgetElement, renderedWidget);

@@ -307,7 +307,7 @@ export function collectSubtreeNodeIds(node) {
 }
 
 const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId']);
-const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor']);
+const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor']);
 
 /**
  * Copie une valeur en remplaçant les ID et toutes les références vers ces ID (liens internes compris).
