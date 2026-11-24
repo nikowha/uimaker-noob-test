@@ -111,6 +111,8 @@ export function createNumberField(label, value, onCommit, scrubOptions = {}) {
 }
 
 const SIDE_LABELS = ['Haut', 'Droite', 'Bas', 'Gauche'];
+/** Ordre affiché (2 par ligne) : haut, bas, puis gauche, droite. Les données restent haut, droite, bas, gauche. */
+const SIDE_DISPLAY_ORDER = [0, 2, 3, 1];
 
 /**
  * Quatre champs numériques pour les côtés (haut, droite, bas, gauche), plus un champ qui règle les quatre d'un coup.
@@ -130,7 +132,7 @@ export function createSidesField(label, sideValues, onCommit) {
   return createElement('div', { className: 'sides-field' }, [
     createElement('div', { className: 'field-label', text: label }),
     createNumberField('Les 4', isSame ? values[0] : undefined, (newValue) => onCommit(newValue === undefined ? undefined : Array(4).fill(newValue)), limits),
-    ...SIDE_LABELS.map((sideLabel, sideIndex) => createNumberField(sideLabel, values[sideIndex], (newValue) => commitSide(sideIndex, newValue), limits)),
+    ...SIDE_DISPLAY_ORDER.map((sideIndex) => createNumberField(SIDE_LABELS[sideIndex], values[sideIndex], (newValue) => commitSide(sideIndex, newValue), limits)),
   ]);
 }
 
