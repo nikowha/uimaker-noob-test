@@ -97,7 +97,7 @@ export function placeAreaModule(area, moduleId) {
 }
 
 const MERGED_OVERRIDE_KEYS = ['content', 'state', 'styleOverrides'];
-const REPLACED_OVERRIDE_KEYS = ['style', 'action', 'events'];
+const REPLACED_OVERRIDE_KEYS = ['style', 'action', 'events', 'activeStates'];
 
 /**
  * Fusionne des valeurs ; null efface une valeur.
@@ -158,13 +158,63 @@ export function applyModuleOverrides(moduleRoot, overrides) {
 }
 
 /**
- * Contenu réel d'une instance : module + réglages + ce que l'instance décide (taille, place, état, action).
+ * Ajoute un état à un module.
+ * @param {object} uiDocument document
+ * @param {string} moduleId module
+ * @param {string} name nom anglais
+ * @param {object} [stateValues] description, variableId, overrides
+ * @returns {string} ID de l'état (E…)
+ */
+export function addModuleState(uiDocument, moduleId, name, stateValues = {}) {
+  const state = { id: createId(uiDocument, 'E'), stateKey: crypto.randomUUID(), name, description: '', overrides: {}, ...stateValues };
+  (uiDocument.modules[moduleId].states ??= []).push(state);
+  return state.id;
+}
+
+/**
+ * Supprime un état et le retire de toutes les instances.
+ * @param {object} uiDocument document
+ * @param {string} moduleId module
+ * @param {string} stateId état
+ */
+export function deleteModuleState(uiDocument, moduleId, stateId) {
+  const module = uiDocument.modules[moduleId];
+  module.states = (module.states ?? []).filter((state) => state.id !== stateId);
+  const visitValue = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value.activeStates)) {
+      value.activeStates = value.activeStates.filter((activeId) => activeId !== stateId);
+      if (value.activeStates.length === 0) delete value.activeStates;
+    }
+    Object.values(value).forEach(visitValue);
+  };
+  visitValue(uiDocument.screens);
+  visitValue(uiDocument.modules);
+}
+
+/**
+ * Réunit les changements des états actifs (choisis, ou reliés à une variable « oui »), dans l'ordre du module.
+ * @param {object} uiDocument document
  * @param {object} module module
+ * @param {string[]} [activeStates] états choisis
+ * @returns {object} réglages
+ */
+export function collectStateOverrides(uiDocument, module, activeStates = []) {
+  return (module.states ?? []).reduce((merged, state) => {
+    const isActive = activeStates.includes(state.id) || uiDocument.variables?.[state.variableId]?.value === true;
+    return isActive ? mergeOverrides(merged, state.overrides ?? {}) : merged;
+  }, {});
+}
+
+/**
+ * Contenu réel d'une instance : module + états actifs + réglages + ce que l'instance décide (taille, place, état, action).
+ * @param {object} uiDocument document
  * @param {object} instance widget ou area qui utilise le module
  * @returns {object} racine (avec les ID du module)
  */
-export function resolveInstanceRoot(module, instance) {
-  const root = applyModuleOverrides(module.root, instance.overrides);
+export function resolveInstanceRoot(uiDocument, instance) {
+  const module = uiDocument.modules[instance.moduleId];
+  const root = applyModuleOverrides(module.root, mergeOverrides(collectStateOverrides(uiDocument, module, instance.activeStates), instance.overrides ?? {}));
   const instanceKeys = module.kind === 'area' ? ['sizing', 'resizableSplitter'] : ['placement'];
   for (const key of instanceKeys) {
     if (instance[key] === undefined) delete root[key]; else root[key] = cloneJson(instance[key]);
@@ -183,7 +233,7 @@ export function resolveInstanceRoot(module, instance) {
  * @param {object} instance widget ou area
  */
 function replaceInstanceByContent(uiDocument, instance) {
-  const detachedNode = cloneSubtreeWithNewIds(uiDocument, resolveInstanceRoot(uiDocument.modules[instance.moduleId], instance), instance.id);
+  const detachedNode = cloneSubtreeWithNewIds(uiDocument, resolveInstanceRoot(uiDocument, instance), instance.id);
   if (instance.notes) detachedNode.notes = instance.notes;
   for (const key of Object.keys(instance)) delete instance[key];
   Object.assign(instance, detachedNode);
@@ -205,6 +255,20 @@ export function detachModuleInstance(uiDocument, instanceId) {
 const REPEAT_DRAW_LIMIT = 64;
 
 /**
+ * Nombre d'éléments dessinés : la variable reliée (dans les limites min / max), sinon le nombre d'exemple.
+ * @param {object} uiDocument document
+ * @param {object} repeatWidget répétition
+ * @returns {number} nombre
+ */
+export function getRepeatCount(uiDocument, repeatWidget) {
+  const { previewCount = 0, countVariableId, minCount = 0, maxCount = 0 } = repeatWidget.content ?? {};
+  const variable = uiDocument.variables?.[countVariableId];
+  let itemCount = variable?.kind === 'number' ? Math.max(minCount, variable.value) : previewCount;
+  if (variable && maxCount > 0) itemCount = Math.min(maxCount, itemCount);
+  return Math.max(0, Math.min(REPEAT_DRAW_LIMIT, Math.round(itemCount)));
+}
+
+/**
  * Contenu dessiné d'une répétition : un conteneur avec le nombre d'exemple d'instances du module répété.
  * @param {object} uiDocument document
  * @param {object} repeatWidget widget de type repeat
@@ -221,11 +285,11 @@ export function buildRepeatContainer(uiDocument, repeatWidget, createItemId) {
   const crossValue = distribution === 'wrap' || crossSize !== 'fill' ? module.root.size?.[crossKey] ?? 'hug' : 'fill';
   const size = { [mainKey]: isFixed ? itemSize : 'fill', [crossKey]: distribution === 'wrap' && crossValue === 'fill' ? itemSize : crossValue };
   if (!isFixed && itemMinSize > 0) size[mainKey === 'width' ? 'minWidth' : 'minHeight'] = itemMinSize;
-  const itemCount = Math.max(0, Math.min(REPEAT_DRAW_LIMIT, Math.round(content.previewCount ?? 0)));
+  const itemCount = getRepeatCount(uiDocument, repeatWidget);
   const children = Array.from({ length: itemCount }, (unusedItem, itemIndex) => {
     const isAlternate = alternateColor && Math.floor(itemIndex / Math.max(1, content.alternateEvery ?? 1)) % 2 === 1;
     const alternateOverrides = isAlternate ? { [module.root.id]: { styleOverrides: { background: alternateColor } } } : {};
-    return { id: createItemId(itemIndex), name: `${module.name}${itemIndex + 1}`, type: 'moduleInstance', moduleId: content.itemModuleId, size: { ...size },
+    return { id: createItemId(itemIndex), name: `${module.name}${itemIndex + 1}`, type: 'moduleInstance', moduleId: content.itemModuleId, size: { ...size }, activeStates: content.itemOverrides?.[itemIndex]?.activeStates,
       overrides: mergeOverrides(alternateOverrides, content.itemOverrides?.[itemIndex]?.overrides ?? {}) };
   });
   return { ...repeatWidget, type: 'container', content: {}, styleOverrides: { borderWidth: 0, radius: 0, ...repeatWidget.styleOverrides }, children,
@@ -241,7 +305,7 @@ export function expandAllModuleInstances(uiDocument) {
   const moduleMenuIds = new Set();
   for (const module of Object.values(uiDocument.modules)) {
     const references = createReferenceSets();
-    collectReferences(module.root, references);
+    collectReferences([module.root, module.states], references);
     references.menus.forEach((menuId) => moduleMenuIds.add(menuId));
   }
   const expandNode = (node, parentModuleIds) => {
@@ -289,13 +353,17 @@ export function listInstanceNodes(uiDocument, instance) {
     const visitPair = (node, baseNode, nodeDepth) => {
       const ownOverride = ownOverrides?.[node.id];
       entries.push({ path, node, baseNode, depth: nodeDepth, isChanged: [...MERGED_OVERRIDE_KEYS, ...REPLACED_OVERRIDE_KEYS].some((key) => ownOverride?.[key] !== undefined) });
-      if (node.moduleId) visitModule(node.moduleId, node.overrides, baseNode.overrides, ownOverride?.overrides, [...path, node.id], nodeDepth + 1, [...parentModuleIds, moduleId]);
+      const innerModule = uiDocument.modules[node.moduleId];
+      const withStates = (innerNode) => mergeOverrides(collectStateOverrides(uiDocument, innerModule, innerNode.activeStates), innerNode.overrides ?? {});
+      if (innerModule) visitModule(node.moduleId, withStates(node), withStates(baseNode), ownOverride?.overrides, [...path, node.id], nodeDepth + 1, [...parentModuleIds, moduleId]);
       const baseChildren = getChildNodes(baseNode);
       getChildNodes(node).forEach((childNode, childIndex) => visitPair(childNode, baseChildren[childIndex], nodeDepth + 1));
     };
     visitPair(applyModuleOverrides(module.root, overrides), applyModuleOverrides(module.root, baseOverrides), depth);
   };
-  visitModule(instance.moduleId, instance.overrides, {}, instance.overrides, [], 0, []);
+  const module = uiDocument.modules[instance.moduleId];
+  const stateOverrides = module ? collectStateOverrides(uiDocument, module, instance.activeStates) : {};
+  visitModule(instance.moduleId, mergeOverrides(stateOverrides, instance.overrides ?? {}), stateOverrides, instance.overrides, [], 0, []);
   return entries;
 }
 
@@ -373,7 +441,7 @@ export function countModuleInstances(uiDocument, moduleId) {
 
 /** @returns {{styles: Set, colorVariables: Set, menus: Set, modules: Set}} relevé de références vide */
 function createReferenceSets() {
-  return { styles: new Set(), colorVariables: new Set(), menus: new Set(), modules: new Set() };
+  return { styles: new Set(), colorVariables: new Set(), menus: new Set(), modules: new Set(), variables: new Set() };
 }
 
 /**
@@ -388,6 +456,7 @@ function collectReferences(value, references) {
     if (!childValue) continue;
     if (key === 'style') references.styles.add(childValue);
     else if (key === 'menuId') references.menus.add(childValue);
+    else if (key === 'variableId' || key === 'countVariableId') references.variables.add(childValue);
     else if (key === 'moduleId' || key === 'itemModuleId') references.modules.add(childValue);
     else if (COLOR_KEYS.has(key) && childValue.startsWith('$')) references.colorVariables.add(childValue.slice(1));
   }
@@ -404,7 +473,7 @@ function collectModuleDependencies(source, moduleIds, includesSubmodules) {
   const references = createReferenceSets();
   for (const moduleId of moduleIds) references.modules.add(moduleId);
   // Un Set parcouru par for…of visite aussi les éléments ajoutés pendant le parcours.
-  for (const moduleId of includesSubmodules ? references.modules : new Set(moduleIds)) collectReferences(source.modules[moduleId]?.root, references);
+  for (const moduleId of includesSubmodules ? references.modules : new Set(moduleIds)) collectReferences([source.modules[moduleId]?.root, source.modules[moduleId]?.states], references);
   for (const menuId of references.menus) collectReferences(source.menus[menuId], references);
   for (const styleId of references.styles) collectReferences(source.styles[styleId], references);
   return references;
@@ -441,7 +510,7 @@ export function buildLibraryEntry(uiDocument, moduleId) {
   for (const packagedModule of Object.values(modules)) {
     const moduleNodeIds = new Set(collectSubtreeNodeIds(packagedModule.root));
     moduleNodeIds.forEach((nodeId) => allInsideIds.add(nodeId));
-    neutralizeExternalLinks(packagedModule.root, moduleNodeIds);
+    neutralizeExternalLinks([packagedModule.root, packagedModule.states], moduleNodeIds);
   }
   for (const menu of Object.values(menus)) neutralizeExternalLinks(menu, allInsideIds);
   const colorVariables = pickEntries(uiDocument.colorVariables, references.colorVariables);
@@ -451,7 +520,8 @@ export function buildLibraryEntry(uiDocument, moduleId) {
   for (const packagedModule of Object.values(modules)) delete packagedModule.hasLocalChanges;
   return { libraryId: module.libraryId, version: module.version ?? 1, name: module.name, kind: module.kind, category: '', tags: [],
     updatedAt: module.libraryUpdatedAt ?? new Date().toISOString(),
-    package: { rootModuleId: moduleId, modules, menus, colorVariables, styles: pickEntries(uiDocument.styles, references.styles) } };
+    package: { rootModuleId: moduleId, modules, menus, colorVariables, styles: pickEntries(uiDocument.styles, references.styles),
+      variables: pickEntries(uiDocument.variables ?? {}, references.variables) } };
 }
 
 /**
@@ -475,17 +545,22 @@ export function installLibraryEntry(uiDocument, entry, shouldUpdate = false) {
     if (existingModule) {
       const [, projectModule] = existingModule;
       matchModuleNodeIds(packagedModule.root, projectModule.root).forEach((projectId, packageId) => idMapping.set(packageId, projectId));
+      for (const state of packagedModule.states ?? []) {
+        const projectState = (projectModule.states ?? []).find((candidate) => candidate.stateKey === state.stateKey);
+        if (projectState) idMapping.set(state.id, projectState.id);
+      }
       const isRootModule = packageModuleId === packageData.rootModuleId;
       const isUpdated = shouldUpdate && (isRootModule || (packagedModule.version > projectModule.version && !projectModule.hasLocalChanges));
       if (!isUpdated) continue;
       const oldReferences = createReferenceSets();
-      collectReferences(projectModule.root, oldReferences);
+      collectReferences([projectModule.root, projectModule.states], oldReferences);
       oldReferences.menus.forEach((menuId) => replacedMenuIds.add(menuId));
     }
     newModuleIds.push(packageModuleId);
     for (const nodeId of collectSubtreeNodeIds(packagedModule.root)) {
       if (!idMapping.has(nodeId)) idMapping.set(nodeId, createId(uiDocument, nodeId.startsWith('A') ? 'A' : 'W'));
     }
+    for (const state of packagedModule.states ?? []) if (!idMapping.has(state.id)) idMapping.set(state.id, createId(uiDocument, 'E'));
   }
   const references = collectModuleDependencies(packageData, newModuleIds, false);
   for (const variableId of references.colorVariables) {
@@ -498,6 +573,15 @@ export function installLibraryEntry(uiDocument, entry, shouldUpdate = false) {
     uiDocument.colorVariables[createdId] = { name: packagedVariable.name,
       values: Object.fromEntries(Object.entries(uiDocument.themes).map(([themeId, theme]) => [themeId, packagedVariable.values[theme.name] ?? fallbackColor])) };
     idMapping.set(variableId, createdId);
+  }
+  uiDocument.variables ??= {};
+  for (const variableId of references.variables) {
+    const packagedVariable = packageData.variables?.[variableId];
+    if (!packagedVariable) continue;
+    const existingVariable = Object.entries(uiDocument.variables).find(([, candidate]) => candidate.name === packagedVariable.name && candidate.kind === packagedVariable.kind);
+    const projectVariableId = existingVariable?.[0] ?? createId(uiDocument, 'D');
+    uiDocument.variables[projectVariableId] ??= packagedVariable;
+    idMapping.set(variableId, projectVariableId);
   }
   for (const styleId of references.styles) {
     if (!packageData.styles[styleId]) continue;
@@ -530,7 +614,7 @@ export function installLibraryEntry(uiDocument, entry, shouldUpdate = false) {
 function hasModuleCycle(modules, moduleId, ancestorIds = []) {
   if (ancestorIds.includes(moduleId)) return true;
   const references = createReferenceSets();
-  collectReferences(modules[moduleId]?.root, references);
+  collectReferences([modules[moduleId]?.root, modules[moduleId]?.states], references);
   return [...references.modules].some((childId) => hasModuleCycle(modules, childId, [...ancestorIds, moduleId]));
 }
 

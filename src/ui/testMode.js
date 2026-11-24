@@ -6,6 +6,7 @@ import { createElement } from '../utils/dom.js';
 import { appSettings, appState, updateAppSetting } from '../model/store.js';
 import { buildNodeIndex, cloneJson } from '../model/document.js';
 import { expandAllModuleInstances } from '../model/modules.js';
+import { computeVariableChange, convertVariableValue } from '../model/variables.js';
 import { getTriggerFallbacks } from '../model/interactions.js';
 import { renderScreen } from '../render/screenRenderer.js';
 import { createSelectElement } from './fields.js';
@@ -197,6 +198,12 @@ function runAction(action, actionContext) {
       if (!targetWidget) { showToast('Widget introuvable'); return; }
       targetWidget.state = { ...targetWidget.state, visible: targetWidget.state?.visible === false };
       renderTestScreens({ keepScale: true });
+      return;
+    }
+    case 'changeVariable': {
+      const variable = testSession.testDocument.variables?.[action.variableId];
+      if (!variable) { showToast('Variable introuvable'); return; }
+      setTestVariable(action.variableId, computeVariableChange(variable, action));
       return;
     }
     case 'custom':
@@ -615,7 +622,7 @@ function describeShortcut(keyboardEvent) {
  * @param {KeyboardEvent} keyboardEvent événement
  */
 function handleTestKeyDown(keyboardEvent) {
-  if (keyboardEvent.target instanceof Element && keyboardEvent.target.closest('.test-text-input')) return;
+  if (keyboardEvent.target instanceof Element && keyboardEvent.target.closest('.test-text-input, .test-variable input:not([type="checkbox"])')) { keyboardEvent.stopImmediatePropagation(); return; }
   keyboardEvent.stopImmediatePropagation();
   if (keyboardEvent.key === 'Escape') {
     if (isAnyMenuOpen()) closeAllMenus();
@@ -666,17 +673,91 @@ function rotateMainScreen() {
 
 /**
  * Copie du projet pour le test : chaque instance de module y devient un vrai contenu, actif et indépendant.
+ * @param {Record<string, any>} [variableValues] valeurs des variables pendant le test
  * @returns {object} document
  */
-function createTestDocument() {
+function createTestDocument(variableValues = {}) {
   const testDocument = cloneJson(appState.uiDocument);
+  for (const [variableId, value] of Object.entries(variableValues)) if (testDocument.variables?.[variableId]) testDocument.variables[variableId].value = value;
   expandAllModuleInstances(testDocument);
   return testDocument;
 }
 
+/**
+ * Relève ce que le test peut changer (cases, valeurs, pages, tailles), par position dans l'écran.
+ * Les ID des éléments répétés changent quand on refait la copie : la position et le nom servent de repère.
+ * @param {object} testDocument copie testée
+ * @returns {Map<string, object>} position → { node, values }
+ */
+function collectTestValues(testDocument) {
+  const valuesByPosition = new Map();
+  const visitNode = (node, position) => {
+    const { selectedIndex, activeIndex, selectedRow, value } = node.content ?? {};
+    valuesByPosition.set(position, { node, values: JSON.stringify({ state: node.state, sizing: node.sizing, size: position.includes('/') ? undefined : node.size, content: { selectedIndex, activeIndex, selectedRow, value } }) });
+    [...(node.children ?? []), ...(node.widgets ?? []), ...(node.root ? [node.root] : [])].forEach((childNode, childIndex) => visitNode(childNode, `${position}/${childIndex}:${childNode.name}`));
+  };
+  for (const screen of testDocument.screens) visitNode(screen, screen.id);
+  return valuesByPosition;
+}
+
+/**
+ * Change une variable pendant le test : refait la copie avec les nouvelles valeurs, en gardant ce que l'utilisateur a changé.
+ * @param {string} variableId variable
+ * @param {any} rawValue valeur voulue
+ */
+function setTestVariable(variableId, rawValue) {
+  const variable = testSession.testDocument.variables?.[variableId];
+  if (!variable) { showToast('Variable introuvable'); return; }
+  testSession.variableValues[variableId] = convertVariableValue(variable, rawValue);
+  const currentValues = collectTestValues(testSession.testDocument);
+  const startValues = testSession.startValues;
+  testSession.testDocument = createTestDocument(testSession.variableValues);
+  const newValues = collectTestValues(testSession.testDocument);
+  testSession.startValues = new Map([...newValues].map(([position, entry]) => [position, entry.values]));
+  for (const [position, { node }] of newValues) {
+    const currentEntry = currentValues.get(position);
+    if (!currentEntry || currentEntry.values === startValues.get(position)) continue;
+    const { state, sizing, size, content } = JSON.parse(currentEntry.values);
+    if (state) node.state = state;
+    if (sizing) node.sizing = sizing;
+    if (size) node.size = size;
+    if (Object.keys(content).length) node.content = { ...node.content, ...content };
+  }
+  testSession.lastTap = null;
+  testSession.hoveredWidgetId = null;
+  closeAllMenus();
+  renderTestScreens({ keepScale: true });
+  renderTestToolbar();
+}
+
+/**
+ * Retient les valeurs de départ du test.
+ */
+function rememberStartValues() {
+  testSession.startValues = new Map([...collectTestValues(testSession.testDocument)].map(([position, entry]) => [position, entry.values]));
+}
+
+/**
+ * Crée le contrôle d'une variable pour la barre du test.
+ * @param {string} variableId variable
+ * @param {object} variable variable
+ * @returns {HTMLElement} contrôle
+ */
+function createVariableControl(variableId, variable) {
+  const inputElement = createElement('input', { attributes: { type: variable.kind === 'boolean' ? 'checkbox' : variable.kind === 'number' ? 'number' : 'text', inputmode: variable.kind === 'number' ? 'numeric' : undefined, min: variable.min, max: variable.max },
+    on: { change: () => setTestVariable(variableId, variable.kind === 'boolean' ? inputElement.checked : inputElement.value) } });
+  if (variable.kind === 'boolean') inputElement.checked = variable.value; else inputElement.value = variable.value;
+  const createStepButton = (label, delta) => createElement('button', { text: label, attributes: { type: 'button' }, on: { click: () => setTestVariable(variableId, variable.value + delta) } });
+  return createElement('label', { className: 'test-toggle test-variable', attributes: { title: variable.description || variable.name } }, [
+    createElement('span', { text: variable.name }),
+    variable.kind === 'number' ? createStepButton('−', -1) : null, inputElement, variable.kind === 'number' ? createStepButton('+', 1) : null]);
+}
+
 /** Remet tout dans l'état de départ (copie fraîche du projet). */
 function resetTestState() {
+  testSession.variableValues = {};
   testSession.testDocument = createTestDocument();
+  rememberStartValues();
   testSession.dialogStack = [];
   closeAllMenus();
   renderTestScreens();
@@ -716,6 +797,7 @@ function renderTestToolbar() {
     createButton('✎ Double tap Pencil', 'Simule le double tap sur le Pencil (événement de l\'écran)', () => simulatePencilBarrelGesture('pencilDoubleTap')),
     createButton('✎ Squeeze', 'Simule le squeeze du Pencil Pro (événement de l\'écran)', () => simulatePencilBarrelGesture('pencilSqueeze')),
     testSession.sizeLabel,
+    ...Object.entries(testDocument.variables ?? {}).map(([variableId, variable]) => createVariableControl(variableId, variable)),
     createElement('span', { className: 'top-spacer' }),
     createButton('Quitter (Échap)', 'Revenir à l\'édition', closeTestMode),
   ].filter(Boolean));
@@ -730,12 +812,13 @@ export function openTestMode() {
   const menuLayerElement = createElement('div', { className: 'test-menu-layer' });
   const overlayElement = createElement('div', { className: 'test-mode' }, [toolbarElement, viewportElement, toastElement, menuLayerElement]);
   testSession = {
-    testDocument: createTestDocument(), screenId: appState.currentScreenId, themeId: appState.currentThemeId,
+    testDocument: createTestDocument(), variableValues: {}, startValues: new Map(), screenId: appState.currentScreenId, themeId: appState.currentThemeId,
     scale: 1, dialogStack: [], overlayElement, viewportElement, toolbarElement, toastElement,
     sizeLabel: createElement('span', { className: 'test-size-label' }), toastTimer: null,
     pressSession: null, lastTap: null, hoveredWidgetId: null, lastWheelTime: 0,
     resizeObserver: new ResizeObserver(() => renderTestScreens()),
   };
+  rememberStartValues();
   setMenuLayer(menuLayerElement);
   viewportElement.addEventListener('pointerdown', handleTestPointerDown);
   viewportElement.addEventListener('pointermove', handleTestPointerMove);

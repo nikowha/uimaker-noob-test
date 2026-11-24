@@ -174,6 +174,7 @@ export const WIDGET_TYPES = {
     fields: [
       { target: 'content', key: 'itemModuleId', label: 'Module répété', kind: 'moduleSelect' },
       { target: 'content', key: 'previewCount', label: 'Nombre d\'exemple', kind: 'number', min: 0, max: 64 },
+      { target: 'content', key: 'countVariableId', label: 'Relier à la variable', kind: 'numberVariable' },
       { target: 'content', key: 'countSource', label: 'Nombre dans l\'app (source)', kind: 'text', placeholder: 'ex. beat.steps' },
       { target: 'content', key: 'minCount', label: 'Nombre min', kind: 'number', min: 0 },
       { target: 'content', key: 'maxCount', label: 'Nombre max', kind: 'number', min: 0 },

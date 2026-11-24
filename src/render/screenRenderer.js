@@ -2,6 +2,7 @@
 import { createElement } from '../utils/dom.js';
 import { buildRepeatContainer, resolveInstanceRoot } from '../model/modules.js';
 import { applyAppearanceToElement, applyThemeVariables, resolveAppearance, resolveColor } from './styleResolver.js';
+import { interpolateWidget } from '../model/variables.js';
 import { fillWidgetContent } from './widgetRenderer.js';
 
 const ALIGN_TO_CSS = { start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch', spaceBetween: 'space-between' };
@@ -187,7 +188,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
       if (!module || parentModuleIds.includes(widget.moduleId)) {
         renderedWidget = { ...widget, type: 'placeholder', content: { description: `Module ${widget.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } };
       } else {
-        const instanceRoot = resolveInstanceRoot(module, widget);
+        const instanceRoot = resolveInstanceRoot(uiDocument, widget);
         const instanceElement = renderWidget(instanceRoot, parentLayout, true, [...parentModuleIds, widget.moduleId]);
         instanceElement.classList.add('ui-component-instance');
         decorateEditorElement(instanceElement, widget, isInsideInstance);
@@ -213,7 +214,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
         widgetElement.append(childElement);
       });
     } else {
-      fillWidgetContent(widgetElement, renderedWidget);
+      fillWidgetContent(widgetElement, interpolateWidget(uiDocument, renderedWidget));
       if (renderedWidget.type === 'checkbox') applyCheckedColor(widgetElement, renderedWidget);
     }
     applyWidgetSizing(widgetElement, renderedWidget, parentLayout);
@@ -238,7 +239,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
     if (area.moduleId) {
       const module = uiDocument.modules[area.moduleId];
       const isUsable = module && !parentModuleIds.includes(area.moduleId);
-      const instanceRoot = isUsable ? resolveInstanceRoot(module, area) : { widgetLayout: { mode: 'free' },
+      const instanceRoot = isUsable ? resolveInstanceRoot(uiDocument, area) : { widgetLayout: { mode: 'free' },
         widgets: [{ id: '', name: area.name, type: 'placeholder', placement: { anchor: 'stretch', x: 0, y: 0 },
           content: { description: `Module ${area.moduleId} ${module ? 'qui se contient lui-même' : 'introuvable'}` } }] };
       const instanceElement = renderArea({ ...instanceRoot, sizing: area.sizing, resizableSplitter: area.resizableSplitter }, parentSplit, true, [...parentModuleIds, area.moduleId]);

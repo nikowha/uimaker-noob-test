@@ -5,7 +5,8 @@ import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, notifyChange, selectNode } from '../model/store.js';
 import { buildNodeIndex, createModuleScreen, isWidgetHolder } from '../model/document.js';
 import { renderScreen } from '../render/screenRenderer.js';
-import { countModuleInstances } from '../model/modules.js';
+import { applyModuleOverrides, countModuleInstances } from '../model/modules.js';
+import { createSelectElement } from './fields.js';
 import { closeModuleEditor, moveWidget, placeLibraryItem } from './editorActions.js';
 
 const DRAG_THRESHOLD_PIXELS = 6;
@@ -35,7 +36,16 @@ function applyViewTransform() {
 
 /** @returns {object|undefined} écran affiché (écran courant, ou module en cours d'édition) */
 function getCurrentScreen() {
-  if (appState.editedModuleId) return createModuleScreen(appState.uiDocument, appState.editedModuleId);
+  if (appState.editedModuleId) {
+    const { uiDocument, editedModuleId, editedStateId } = appState;
+    const moduleScreen = createModuleScreen(uiDocument, editedModuleId);
+    const module = uiDocument.modules[editedModuleId];
+    const editedState = module.states?.find((state) => state.id === editedStateId);
+    if (!editedState) return moduleScreen;
+    const stateRoot = applyModuleOverrides(module.root, editedState.overrides);
+    if (module.kind === 'area') moduleScreen.root = stateRoot; else moduleScreen.root.widgets = [stateRoot];
+    return moduleScreen;
+  }
   return appState.uiDocument.screens.find((screen) => screen.id === appState.currentScreenId);
 }
 
@@ -236,11 +246,14 @@ function renderModuleBanner() {
   const { editedModuleId, uiDocument, parentModuleIds } = appState;
   moduleBannerElement.hidden = !editedModuleId;
   viewportElement.classList.toggle('is-editing-module', Boolean(editedModuleId));
+  viewportElement.classList.toggle('is-editing-state', Boolean(appState.editedStateId));
   if (!editedModuleId) return;
   const instanceCount = countModuleInstances(uiDocument, editedModuleId);
   const parentModule = uiDocument.modules[parentModuleIds.at(-1)];
   moduleBannerElement.replaceChildren(
     createElement('span', { text: `Module ${editedModuleId} · ${uiDocument.modules[editedModuleId].name} — change ${instanceCount} instance(s) de ce projet` }),
+    createSelectElement(appState.editedStateId ?? '', [{ value: '', label: 'Normal' }, ...(uiDocument.modules[editedModuleId].states ?? []).map((state) => ({ value: state.id, label: `État : ${state.name}` }))],
+      (stateId) => { appState.editedStateId = stateId || null; notifyChange(); }),
     createElement('button', { text: parentModule ? `Terminé (retour à ${parentModule.name})` : 'Terminé', attributes: { type: 'button' }, on: { click: closeModuleEditor } }),
   );
 }

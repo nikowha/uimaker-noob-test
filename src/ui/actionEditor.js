@@ -3,6 +3,7 @@ import { createElement } from '../utils/dom.js';
 import { appState } from '../model/store.js';
 import { buildNodeIndex } from '../model/document.js';
 import { ACTION_TYPES, EVENT_TRIGGERS } from '../model/interactions.js';
+import { VARIABLE_OPERATIONS } from '../model/variables.js';
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
 
 /**
@@ -14,6 +15,7 @@ function listTargetChoices(targetKind) {
   const { uiDocument } = appState;
   if (targetKind === 'screen') return uiDocument.screens.map((screen) => ({ value: screen.id, label: `${screen.id} · ${screen.name}` }));
   if (targetKind === 'menu') return Object.entries(uiDocument.menus ?? {}).map(([menuId, menu]) => ({ value: menuId, label: `${menuId} · ${menu.name}` }));
+  if (targetKind === 'variable') return Object.entries(uiDocument.variables ?? {}).map(([variableId, variable]) => ({ value: variableId, label: `${variable.name} (${variableId})` }));
   const { editedModuleId } = appState;
   const isInScope = (record) => (editedModuleId ? record.screen.id === editedModuleId : !uiDocument.modules[record.screen.id]);
   const widgetRecords = [...buildNodeIndex(uiDocument).values()].filter((record) => record.kind === 'widget' && isInScope(record)
@@ -33,7 +35,7 @@ export function createActionEditor(action, onChange) {
   const commitAction = (changes) => onChange({ ...currentAction, ...changes });
   const controls = [createSelectElement(currentAction.type, ACTION_TYPES, (actionType) => onChange({ type: actionType }))];
   if (actionDefinition.targetKind) {
-    const targetKey = actionDefinition.targetKind === 'menu' ? 'menuId' : 'target';
+    const targetKey = { menu: 'menuId', variable: 'variableId' }[actionDefinition.targetKind] ?? 'target';
     const targetChoices = listTargetChoices(actionDefinition.targetKind);
     const currentTarget = currentAction[targetKey] ?? '';
     if (currentTarget && !targetChoices.some((choice) => choice.value === currentTarget)) targetChoices.push({ value: currentTarget, label: currentTarget });
@@ -45,6 +47,15 @@ export function createActionEditor(action, onChange) {
       on: { change: () => commitAction({ page: Number(pageInput.value) || 0 }) } });
     pageInput.value = currentAction.page ?? 0;
     controls.push(pageInput);
+  }
+  if (currentAction.type === 'changeVariable') {
+    const operation = currentAction.operation ?? 'set';
+    controls.push(createSelectElement(operation, VARIABLE_OPERATIONS, (newOperation) => commitAction({ operation: newOperation })));
+    if (operation !== 'toggle') {
+      const amountInput = createElement('input', { attributes: { type: 'text', placeholder: 'valeur' }, on: { change: () => commitAction({ operation, amount: amountInput.value }) } });
+      amountInput.value = currentAction.amount ?? '';
+      controls.push(amountInput);
+    }
   }
   if (currentAction.type === 'custom') {
     const descriptionInput = createElement('input', { attributes: { type: 'text', placeholder: 'Ce que fait l\'action' },

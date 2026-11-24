@@ -3,7 +3,7 @@
 import { SCREEN_PRESETS, WIDGET_TYPES } from './catalog.js';
 
 export const UISPEC_FORMAT = 'uimaker-noob-uispec';
-export const UISPEC_FORMAT_VERSION = '0.2';
+export const UISPEC_FORMAT_VERSION = '0.3';
 export const GENERATOR_NAME = 'UImaker_noob prototype 0.1';
 
 const ID_PATTERN = /^([A-Z])(\d+)$/;
@@ -37,7 +37,7 @@ export function recomputeIdCounters(uiDocument) {
       Object.values(value).forEach(visitValue);
     }
   };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'modules', 'menus']) {
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'modules', 'menus', 'variables']) {
     Object.keys(uiDocument[collectionName] ?? {}).forEach(registerId);
   }
   visitValue(uiDocument.screens);
@@ -124,7 +124,7 @@ export function createEmptyDocument() {
     format: UISPEC_FORMAT, formatVersion: UISPEC_FORMAT_VERSION, generator: GENERATOR_NAME,
     project: { name: 'MyApp', notes: '', defaultTheme: 'H1', idCounters: {},
       defaults: { areaSizing: { mode: 'fill' }, resizableSplitter: false } },
-    themes: {}, colorVariables: {}, styles: {}, icons: {}, modules: {}, menus: {}, screens: [],
+    themes: {}, colorVariables: {}, styles: {}, icons: {}, modules: {}, menus: {}, variables: {}, screens: [],
   };
   const themeId = createId(uiDocument, 'H');
   uiDocument.themes[themeId] = { name: 'Default' };
@@ -306,7 +306,7 @@ export function collectSubtreeNodeIds(node) {
   return [node.id, ...[...(node.children ?? []), ...(node.widgets ?? [])].flatMap(collectSubtreeNodeIds)];
 }
 
-const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId', 'itemModuleId']);
+const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId', 'itemModuleId', 'variableId', 'countVariableId']);
 const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor', 'alternateColor']);
 
 /**
@@ -325,6 +325,7 @@ export function remapIds(value, idMapping) {
       if (COLOR_REFERENCE_KEYS.has(key) && childValue.startsWith('$')) return [key, `$${getNewId(childValue.slice(1))}`];
       return [key, childValue];
     }
+    if (key === 'activeStates' && Array.isArray(childValue)) return [key, childValue.map(getNewId)];
     if (key === 'overrides' && childValue) {
       return [key, Object.fromEntries(Object.entries(childValue).map(([nodeId, nodeOverride]) => [getNewId(nodeId), remapIds(nodeOverride, idMapping)]))];
     }
@@ -471,7 +472,7 @@ export function normalizeImportedDocument(importedValue) {
   uiDocument.formatVersion = UISPEC_FORMAT_VERSION;
   uiDocument.project ??= { name: 'ImportedApp' };
   uiDocument.project.defaults ??= { areaSizing: { mode: 'fill' }, resizableSplitter: false };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'menus']) uiDocument[collectionName] ??= {};
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'menus', 'variables']) uiDocument[collectionName] ??= {};
   migrateComponentsToModules(uiDocument);
   if (Object.keys(uiDocument.themes).length === 0) uiDocument.themes.H1 = { name: 'Default' };
   if (!uiDocument.themes[uiDocument.project.defaultTheme]) uiDocument.project.defaultTheme = Object.keys(uiDocument.themes)[0];

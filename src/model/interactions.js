@@ -27,6 +27,7 @@ export const ACTION_TYPES = [
   { value: 'openContextMenu', label: 'Ouvrir un menu contextuel', targetKind: 'menu' },
   { value: 'showPage', label: 'Afficher une page (pile de pages)', targetKind: 'pageStack' },
   { value: 'toggleVisibility', label: 'Afficher / cacher un widget', targetKind: 'widget' },
+  { value: 'changeVariable', label: 'Changer une variable de test', targetKind: 'variable' },
   { value: 'custom', label: 'Action perso (décrite)' },
 ];
 

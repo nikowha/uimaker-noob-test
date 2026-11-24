@@ -4,6 +4,7 @@ import { createEmptyDocument, normalizeImportedDocument } from './document.js';
 const STORAGE_KEY = 'uimakerNoob.prototype.document';
 const SETTINGS_STORAGE_KEY = 'uimakerNoob.settings';
 const HISTORY_LIMIT = 100;
+const STATE_LOCK_MESSAGE = 'Tu modifies un état : repasse sur « Normal » (bandeau) pour changer la structure du module.';
 
 /** Réglages de l'application (pas du projet), gardés dans l'appareil. */
 export const DEFAULT_APP_SETTINGS = {
@@ -65,6 +66,7 @@ export const appState = {
   selectedId: null,          // ID d'un écran, area, widget, ou style (T…)
   currentScreenId: null,
   editedModuleId: null,      // module en cours d'édition sur le canevas (null = on édite l'écran courant)
+  editedStateId: null,       // état du module en cours d'édition (null = apparence normale)
   parentModuleIds: [],       // modules d'où l'on vient (édition d'un module dans un module)
   currentThemeId: null,
   armedLibraryItem: null,    // { kind: 'widget'|'module'|'libraryModule'|'icon', value } en attente d'un tap sur le canevas
@@ -106,6 +108,8 @@ function repairViewState() {
   const { uiDocument } = appState;
   if (!uiDocument.screens.some((screen) => screen.id === appState.currentScreenId)) appState.currentScreenId = uiDocument.screens[0]?.id ?? null;
   if (appState.editedModuleId && !uiDocument.modules[appState.editedModuleId]) { appState.editedModuleId = null; appState.parentModuleIds = []; }
+  const editedStates = uiDocument.modules[appState.editedModuleId]?.states ?? [];
+  if (!editedStates.some((state) => state.id === appState.editedStateId)) appState.editedStateId = null;
   if (!uiDocument.themes[appState.currentThemeId]) appState.currentThemeId = uiDocument.project.defaultTheme ?? Object.keys(uiDocument.themes)[0];
 }
 
@@ -117,13 +121,18 @@ function repairViewState() {
 export function commitChange(mutateDocument) {
   const previousSnapshot = JSON.stringify(appState.uiDocument);
   try {
-    const editedRootBefore = JSON.stringify(appState.uiDocument.modules[appState.editedModuleId]?.root);
+    const moduleBefore = appState.uiDocument.modules[appState.editedModuleId];
+    const editedRootBefore = JSON.stringify(moduleBefore?.root);
+    const editedStatesBefore = JSON.stringify(moduleBefore?.states);
     mutateDocument(appState.uiDocument);
     const editedModule = appState.uiDocument.modules[appState.editedModuleId];
-    if (editedModule && JSON.stringify(editedModule.root) !== editedRootBefore) editedModule.hasLocalChanges = true;
+    const isRootChanged = editedModule && JSON.stringify(editedModule.root) !== editedRootBefore;
+    if (isRootChanged && appState.editedStateId) throw new Error(STATE_LOCK_MESSAGE);
+    if (isRootChanged || (editedModule && JSON.stringify(editedModule.states) !== editedStatesBefore)) editedModule.hasLocalChanges = true;
   } catch (error) {
     console.error('commitChange', error);
     appState.uiDocument = JSON.parse(previousSnapshot);
+    if (error.message === STATE_LOCK_MESSAGE) { alert(STATE_LOCK_MESSAGE); notifyChange(); }
     return false;
   }
   if (JSON.stringify(appState.uiDocument) === previousSnapshot) { notifyChange(); return true; }
@@ -167,6 +176,7 @@ export function replaceDocument(newDocument) {
   });
   appState.selectedId = null;
   appState.editedModuleId = null;
+  appState.editedStateId = null;
   appState.parentModuleIds = [];
   appState.currentScreenId = newDocument.screens[0]?.id ?? null;
   appState.currentThemeId = newDocument.project.defaultTheme;
@@ -195,6 +205,7 @@ export function loadInitialDocument() {
 export function showScreen(screenId) {
   appState.currentScreenId = screenId;
   appState.editedModuleId = null;
+  appState.editedStateId = null;
   appState.parentModuleIds = [];
 }
 

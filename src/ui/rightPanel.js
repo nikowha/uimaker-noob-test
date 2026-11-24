@@ -5,7 +5,8 @@ import { WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, countStyleUsers, createId, insertWidget } from '../model/document.js';
 import { buildTemplate, TEMPLATE_CATEGORIES } from '../model/templates.js';
 import { getIconSvg, isIconLibraryLoaded, loadIconLibrary, searchIcons } from '../render/iconLibrary.js';
-import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
+import { convertVariableValue, countVariableUsers, createVariable, setVariableKind, VARIABLE_KINDS } from '../model/variables.js';
+import { createButtonRow, createCheckboxField, createNumberField, createPanelSection, createSelectElement, createSelectField, createTextField } from './fields.js';
 import { startLibraryDrag } from './canvasView.js';
 import { applyIconFromLibrary, findDefaultHolderId } from './editorActions.js';
 import { createModulesView } from './modulesView.js';
@@ -14,7 +15,7 @@ import { convertMenuItemsToText, flattenMenuItems, parseMenuText } from '../mode
 
 const RIGHT_SECTIONS = [
   { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'modules', label: 'Modules' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
-  { value: 'styles', label: 'Styles partagés' }, { value: 'themes', label: 'Thèmes et couleurs' },
+  { value: 'styles', label: 'Styles partagés' }, { value: 'variables', label: 'Variables de test' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
 const FREE_TEMPLATE_WIDTH = 320;
@@ -242,6 +243,38 @@ function createThemesView() {
   ];
 }
 
+/** @returns {HTMLElement[]} contenu de la section Variables de test */
+function createVariablesView() {
+  const { uiDocument } = appState;
+  const variableRows = Object.entries(uiDocument.variables ?? {}).map(([variableId, variable]) => {
+    const update = (mutateVariable) => commitChange((targetDocument) => mutateVariable(targetDocument.variables[variableId]));
+    const userCount = countVariableUsers(uiDocument, variableId);
+    const valueField = variable.kind === 'boolean' ? createCheckboxField('Valeur de départ : oui', variable.value, (value) => update((target) => { target.value = value; }))
+      : variable.kind === 'number' ? createNumberField('Valeur de départ', variable.value, (value) => update((target) => { target.value = convertVariableValue(target, value); }), { min: variable.min, max: variable.max })
+        : createTextField('Valeur de départ', variable.value, (value) => update((target) => { target.value = value; }));
+    return createElement('div', { className: 'event-row' }, [
+      createTextField('Nom', variable.name, (name) => update((target) => { target.name = name.trim().replace(/[{}\s]+/g, '') || target.name; })),
+      createSelectField('Type', variable.kind, VARIABLE_KINDS, (kind) => update((target) => setVariableKind(target, kind))),
+      valueField,
+      ...(variable.kind === 'number' ? [createNumberField('Min', variable.min, (value) => update((target) => { if (value === undefined) delete target.min; else target.min = value; })),
+        createNumberField('Max', variable.max, (value) => update((target) => { if (value === undefined) delete target.max; else target.max = value; }))] : []),
+      createTextField('Description', variable.description, (description) => update((target) => { target.description = description; })),
+      createElement('div', { className: 'panel-hint', text: `${variableId} · ${userCount} lien(s)` }),
+      createButtonRow([{ label: 'Supprimer', isDanger: true, onClick: () => {
+        if (userCount === 0 || confirm(`« ${variable.name} » a ${userCount} lien(s). La supprimer quand même ?`)) commitChange((targetDocument) => { delete targetDocument.variables[variableId]; });
+      } }]),
+    ]);
+  });
+  return [createPanelSection('Variables de test', [
+    createElement('div', { className: 'panel-hint', text: 'Une donnée de l\'app, pour essayer l\'UI. Relie-la à une répétition (nombre), à un état de module (oui / non), à un texte avec {nom}, ou à un bouton (action « Changer une variable »). En test, tu changes sa valeur dans la barre.' }),
+    ...variableRows,
+    createButtonRow([{ label: '+ Variable', onClick: () => commitChange((targetDocument) => {
+      const variableId = createId(targetDocument, 'D');
+      (targetDocument.variables ??= {})[variableId] = createVariable(`data.value${variableId.slice(1)}`);
+    }) }]),
+  ])];
+}
+
 /** Redessine la fenêtre de droite. */
 export function renderRightPanel() {
   sectionSelectHost.replaceChildren(createSelectElement(appState.rightPanelSection, RIGHT_SECTIONS, (section) => { appState.rightPanelSection = section; notifyChange(); }));
@@ -249,7 +282,7 @@ export function renderRightPanel() {
   const isSearchFocused = activeElement?.type === 'search' && panelBodyElement.contains(activeElement);
   if (isSearchFocused) return;
   const scrollPosition = panelBodyElement.scrollTop;
-  const sectionBuilders = { widgets: createWidgetLibrary, modules: () => createModulesView(createLibraryTile), templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, themes: createThemesView };
+  const sectionBuilders = { widgets: createWidgetLibrary, modules: () => createModulesView(createLibraryTile), templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, variables: createVariablesView, themes: createThemesView };
   panelBodyElement.replaceChildren(...(sectionBuilders[appState.rightPanelSection] ?? createWidgetLibrary)());
   panelBodyElement.scrollTop = scrollPosition;
 }

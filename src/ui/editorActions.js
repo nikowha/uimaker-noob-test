@@ -192,6 +192,7 @@ export function openModuleEditor(moduleId) {
   if (appState.editedModuleId === moduleId) return;
   if (appState.editedModuleId) appState.parentModuleIds.push(appState.editedModuleId);
   appState.editedModuleId = moduleId;
+  appState.editedStateId = null;
   appState.armedLibraryItem = null;
   selectNode(moduleId);
 }
@@ -199,6 +200,7 @@ export function openModuleEditor(moduleId) {
 /** Termine l'édition du module : revient au module d'où l'on vient, sinon à l'écran. */
 export function closeModuleEditor() {
   const { modules } = appState.uiDocument;
+  appState.editedStateId = null;
   do { appState.editedModuleId = appState.parentModuleIds.pop() ?? null; } while (appState.editedModuleId && !modules[appState.editedModuleId]);
   selectNode(appState.editedModuleId);
 }

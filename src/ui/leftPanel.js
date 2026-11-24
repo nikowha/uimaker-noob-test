@@ -3,7 +3,7 @@ import { createElement } from '../utils/dom.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { ANCHORS, APPEARANCE_FIELDS, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
-import { canRepeatModuleIn, countModuleInstances, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
+import { addModuleState, canRepeatModuleIn, countModuleInstances, deleteModuleState, getRepeatCount, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
 import { getLibraryEntry } from '../io/moduleLibrary.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import {
@@ -27,6 +27,7 @@ let sectionSelectHost = null;
 const innerNodeKeyByInstance = new Map();
 /** Élément choisi dans chaque répétition (clé = ID de la répétition). */
 const repeatItemIndexByWidget = new Map();
+let lastStateSelectedId = null;
 
 /**
  * Champs d'apparence (style ou valeurs propres d'un élément).
@@ -199,7 +200,7 @@ function createAreaProperties(area, record) {
         (isResizable) => updateNode(area.id, (targetArea) => { targetArea.resizableSplitter = isResizable; })),
     ]));
   }
-  if (area.moduleId) sections.push(createInstanceSettingsSection(area));
+  if (area.moduleId) sections.push(...createInstanceStateSection(area, (mutateNode) => updateNode(area.id, mutateNode)), createInstanceSettingsSection(area));
   if (!area.split && !area.moduleId) sections.push(createWidgetLayoutSection(area));
   if (!area.moduleId) sections.push(createNodeAppearanceSection(area, 'area'));
   sections.push(createEventsSection(area, false, (mutateNode) => updateNode(area.id, mutateNode)));
@@ -282,6 +283,9 @@ function createWidgetContentField(widget, fieldDefinition, updateWidget = (mutat
   switch (fieldDefinition.kind) {
     case 'textarea': return createTextField(fieldDefinition.label, currentValue, commitValue, { isMultiline: true });
     case 'number': return createNumberField(fieldDefinition.label, currentValue, (newValue) => commitValue(newValue ?? 0), { min: fieldDefinition.min, max: fieldDefinition.max });
+    case 'numberVariable': return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— aucune —' },
+      ...Object.entries(appState.uiDocument.variables ?? {}).filter(([, variable]) => variable.kind === 'number').map(([variableId, variable]) => ({ value: variableId, label: `${variable.name} = ${variable.value}` }))],
+    (variableId) => commitValue(variableId || undefined));
     case 'moduleSelect': return createSelectField(fieldDefinition.label, currentValue ?? '', [{ value: '', label: '— choisir un module —' },
       ...Object.entries(appState.uiDocument.modules).filter(([, module]) => module.kind === 'widget').map(([moduleId, module]) => ({ value: moduleId, label: `${module.name} (${moduleId})` }))], commitModuleChoice);
     case 'select': return createSelectField(fieldDefinition.label, currentValue, fieldDefinition.options, commitValue);
@@ -373,7 +377,7 @@ function createWidgetProperties(widget, record) {
       { label: 'Supprimer', isDanger: true, onClick: deleteSelection },
     ]),
   ].filter(Boolean))];
-  if (widget.type === 'moduleInstance') sections.push(createInstanceSettingsSection(widget));
+  if (widget.type === 'moduleInstance') sections.push(...createInstanceStateSection(widget, (mutateNode) => updateNode(widget.id, mutateNode)), createInstanceSettingsSection(widget));
   if (typeDefinition?.fields.length) sections.push(createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition))));
   if (widget.type === 'repeat' && widget.content?.itemModuleId) sections.push(...createRepeatSections(widget));
   const sizeAndPlacementFields = [
@@ -434,13 +438,84 @@ function createModuleButtonRow(moduleId) {
 }
 
 /**
+ * Cases « états » d'une instance.
+ * @param {object} instance instance (moduleId, activeStates)
+ * @param {(mutateInstance: (instance: object) => void) => void} updateInstance applique une modification
+ * @returns {HTMLElement[]} cases
+ */
+function createStateCheckboxes(instance, updateInstance) {
+  return (appState.uiDocument.modules[instance.moduleId]?.states ?? []).map((state) => createCheckboxField(`État : ${state.name}`, instance.activeStates?.includes(state.id), (isActive) => updateInstance((targetInstance) => {
+    const otherStates = (targetInstance.activeStates ?? []).filter((stateId) => stateId !== state.id);
+    const activeStates = isActive ? [...otherStates, state.id] : otherStates;
+    if (activeStates.length) targetInstance.activeStates = activeStates; else delete targetInstance.activeStates;
+  })));
+}
+
+/**
+ * Section « États » d'une instance (vide si le module n'en a pas).
+ * @param {object} instance instance
+ * @param {(mutateInstance: (instance: object) => void) => void} updateInstance applique une modification
+ * @returns {HTMLElement[]} section
+ */
+function createInstanceStateSection(instance, updateInstance) {
+  const checkboxes = createStateCheckboxes(instance, updateInstance);
+  return checkboxes.length ? [createPanelSection('États actifs', checkboxes)] : [];
+}
+
+/**
+ * Section « États » d'un module : ajouter, nommer, décrire, relier à une variable, supprimer.
+ * @param {string} moduleId module
+ * @returns {HTMLElement} section
+ */
+function createModuleStatesSection(moduleId) {
+  const { modules, variables } = appState.uiDocument;
+  const updateState = (stateId, mutateState) => updateNode(moduleId, (targetModule) => mutateState(targetModule.states.find((state) => state.id === stateId)));
+  const variableChoices = [{ value: '', label: '— aucune —' }, ...Object.entries(variables ?? {}).filter(([, variable]) => variable.kind === 'boolean').map(([variableId, variable]) => ({ value: variableId, label: `${variable.name} (${variableId})` }))];
+  const openState = (stateId) => { appState.editedModuleId = moduleId; appState.editedStateId = stateId; notifyChange(); };
+  return createPanelSection('États', [
+    createElement('div', { className: 'panel-hint', text: 'Une apparence par situation (muet, sélectionné, en erreur…). Plusieurs états peuvent être actifs : le dernier de la liste l\'emporte.' }),
+    ...(modules[moduleId].states ?? []).map((state) => createElement('div', { className: 'event-row' }, [
+      createTextField('Nom (anglais)', state.name, (newName) => updateState(state.id, (targetState) => { targetState.name = newName.trim() || targetState.name; })),
+      createTextField('Quand ?', state.description, (description) => updateState(state.id, (targetState) => { targetState.description = description; }), { placeholder: 'ex. la piste est muette' }),
+      createSelectField('Variable de test', state.variableId ?? '', variableChoices, (variableId) => updateState(state.id, (targetState) => setOrDeleteValue(targetState, 'variableId', variableId))),
+      createButtonRow([{ label: 'Modifier l\'apparence', onClick: () => openState(state.id) },
+        { label: 'Supprimer', isDanger: true, onClick: () => commitChange((uiDocument) => deleteModuleState(uiDocument, moduleId, state.id)) }]),
+    ])),
+    createButtonRow([{ label: '+ État', onClick: () => {
+      let stateId = null;
+      commitChange((uiDocument) => { stateId = addModuleState(uiDocument, moduleId, `State${(uiDocument.modules[moduleId].states ?? []).length + 1}`); });
+      if (stateId) notifyChange();
+    } }]),
+  ]);
+}
+
+/**
+ * Paramètres de l'état en cours d'édition.
+ * @returns {HTMLElement[]} sections
+ */
+function createStateProperties() {
+  const { editedModuleId, editedStateId, selectedId, uiDocument } = appState;
+  const state = uiDocument.modules[editedModuleId].states.find((candidate) => candidate.id === editedStateId);
+  const instance = { id: `state:${state.id}`, moduleId: editedModuleId, overrides: state.overrides };
+  if (selectedId !== lastStateSelectedId) {
+    lastStateSelectedId = selectedId;
+    if (selectedId) innerNodeKeyByInstance.set(instance.id, selectedId);
+  }
+  const updateState = (mutateState) => updateNode(editedModuleId, (targetModule) => mutateState(targetModule.states.find((candidate) => candidate.id === editedStateId)));
+  return [createPanelSection('État', [createInfoRow('ID', state.id), createInfoRow('Nom', state.name), createInfoRow('Quand ?', state.description || '—'),
+    createButtonRow([{ label: 'Revenir à Normal', onClick: () => { appState.editedStateId = null; selectNode(editedModuleId); } }])]),
+  createInstanceSettingsSection(instance, updateState, 'Ce que change cet état', true)];
+}
+
+/**
  * Section « Réglages de cette instance » : change un élément interne sans toucher aux autres instances.
  * @param {object} instance widget ou area qui utilise un module
  * @param {(mutateInstance: (instance: object) => void) => void} [updateInstance] applique une modification à l'instance
  * @param {string} [title] titre
+ * @param {boolean} [isModuleState] vrai pour régler un état du module (la racine est réglable aussi)
  * @returns {HTMLElement} section
  */
-function createInstanceSettingsSection(instance, updateInstance = (mutateInstance) => updateNode(instance.id, mutateInstance), title = 'Réglages de cette instance') {
+function createInstanceSettingsSection(instance, updateInstance = (mutateInstance) => updateNode(instance.id, mutateInstance), title = 'Réglages de cette instance', isModuleState = false) {
   const entries = listInstanceNodes(appState.uiDocument, instance);
   if (entries.length === 0) return createPanelSection(title, [createElement('div', { className: 'panel-hint', text: 'Module introuvable.' })]);
   const getEntryKey = (entry) => [...entry.path, entry.node.id].join('/');
@@ -448,16 +523,17 @@ function createInstanceSettingsSection(instance, updateInstance = (mutateInstanc
     ?? entries.find((entry) => WIDGET_TYPES[entry.node.type]?.fields.length && !entry.node.children) ?? entries[0];
   const { node } = selectedEntry;
   const updateInner = (mutateNode) => updateInstanceNode(updateInstance, selectedEntry, mutateNode);
-  const isInstanceRoot = selectedEntry === entries[0];
+  const isInstanceRoot = selectedEntry === entries[0] && !isModuleState;
   const typeDefinition = WIDGET_TYPES[node.type];
   const updateState = (key, value) => updateInner((targetNode) => { targetNode.state = { ...targetNode.state, [key]: value }; });
   const styleChoices = [{ value: '', label: '— aucun —' }, ...Object.entries(appState.uiDocument.styles).map(([styleId, style]) => ({ value: styleId, label: `${style.name} (${styleId})` }))];
   const changedCount = entries.filter((entry) => entry.isChanged).length;
   const contentFields = (typeDefinition?.fields ?? []).filter((fieldDefinition) => fieldDefinition.target !== 'widget' && fieldDefinition.kind !== 'pageStackRef');
   return createPanelSection(title, [
-    createElement('div', { className: 'panel-hint', text: 'Change un élément ici sans toucher aux autres instances. ● = différent du module.' }),
+    createElement('div', { className: 'panel-hint', text: isModuleState ? 'Ce que cet état change. ● = différent de « Normal ».' : 'Change un élément ici sans toucher aux autres instances. ● = différent du module.' }),
+    ...(node.moduleId ? createStateCheckboxes(node, updateInner) : []),
     createSelectField('Élément', getEntryKey(selectedEntry), entries.map((entry) => ({ value: getEntryKey(entry), label: `${'\u2003'.repeat(entry.depth)}${entry.isChanged ? '● ' : ''}${entry.node.name ?? entry.node.id} (${entry.node.id})` })),
-      (entryKey) => { innerNodeKeyByInstance.set(instance.id, entryKey); notifyChange(); }),
+      (entryKey) => { innerNodeKeyByInstance.set(instance.id, entryKey); if (isModuleState && !entryKey.includes('/')) selectNode(entryKey); else notifyChange(); }),
     ...contentFields.map((fieldDefinition) => createWidgetContentField(node, fieldDefinition, updateInner)),
     ...(isInstanceRoot || !node.type ? [] : [
       createCheckboxField('Actif', node.state?.enabled !== false, (isEnabled) => updateState('enabled', isEnabled)),
@@ -465,14 +541,14 @@ function createInstanceSettingsSection(instance, updateInstance = (mutateInstanc
       createElement('div', { className: 'field-label', text: 'Action du clic / tap' }),
       createActionEditor(node.action, (newAction) => updateInner((targetNode) => { targetNode.action = newAction; })),
     ]),
-    node.moduleId ? null : createPanelSection('Apparence (cette instance)', [
+    node.moduleId ? null : createPanelSection(isModuleState ? 'Apparence dans cet état' : 'Apparence (cette instance)', [
       createSelectField('Style lié', node.style ?? '', styleChoices, (styleId) => updateInner((targetNode) => setOrDeleteValue(targetNode, 'style', styleId))),
       ...createAppearanceFields(node.styleOverrides ?? {}, (key, value) => updateInner((targetNode) => {
         targetNode.styleOverrides ??= {};
         setOrDeleteValue(targetNode.styleOverrides, key, value);
       })),
     ], false),
-    isInstanceRoot ? null : createPanelSection('Événements (cette instance)', [createEventsSection(node, false, updateInner)], false),
+    isInstanceRoot ? null : createPanelSection(isModuleState ? 'Événements dans cet état' : 'Événements (cette instance)', [createEventsSection(node, false, updateInner)], false),
     createButtonRow([
       selectedEntry.isChanged ? { label: 'Rétablir cet élément', onClick: () => updateInner(null) } : null,
       changedCount ? { label: `Tout rétablir (${changedCount})`, onClick: () => updateInstance((targetInstance) => { targetInstance.overrides = {}; }) } : null,
@@ -486,19 +562,21 @@ function createInstanceSettingsSection(instance, updateInstance = (mutateInstanc
  * @returns {HTMLElement[]} sections
  */
 function createRepeatSections(widget) {
-  const itemCount = Math.max(1, widget.content.previewCount ?? 1);
+  const itemCount = Math.max(1, getRepeatCount(appState.uiDocument, widget));
   const itemIndex = Math.min(repeatItemIndexByWidget.get(widget.id) ?? 0, itemCount - 1);
-  const itemInstance = { id: `${widget.id}#${itemIndex}`, moduleId: widget.content.itemModuleId, overrides: widget.content.itemOverrides?.[itemIndex]?.overrides };
+  const itemInstance = { id: `${widget.id}#${itemIndex}`, moduleId: widget.content.itemModuleId, overrides: widget.content.itemOverrides?.[itemIndex]?.overrides,
+    activeStates: widget.content.itemOverrides?.[itemIndex]?.activeStates };
   const updateItem = (mutateItem) => updateNode(widget.id, (targetWidget) => {
     const itemOverrides = targetWidget.content.itemOverrides ??= {};
     mutateItem(itemOverrides[itemIndex] ??= {});
-    if (Object.keys(itemOverrides[itemIndex].overrides ?? {}).length === 0) delete itemOverrides[itemIndex];
+    if (Object.keys(itemOverrides[itemIndex].overrides ?? {}).length === 0 && !itemOverrides[itemIndex].activeStates) delete itemOverrides[itemIndex];
   });
   return [createPanelSection('Éléments répétés', [
     createElement('div', { className: 'panel-hint', text: 'Le nombre d\'exemple sert à dessiner et à tester ; l\'app décidera du vrai nombre. Tu peux donner des valeurs d\'exemple à chaque élément.' }),
     createModuleButtonRow(widget.content.itemModuleId),
     createSelectField('Élément à régler', String(itemIndex), Array.from({ length: itemCount }, (unusedItem, index) => ({ value: String(index),
       label: `${widget.content.itemOverrides?.[index] ? '● ' : ''}Élément ${index + 1}` })), (indexText) => { repeatItemIndexByWidget.set(widget.id, Number(indexText)); notifyChange(); }),
+    ...createStateCheckboxes(itemInstance, updateItem),
   ]), createInstanceSettingsSection(itemInstance, updateItem, 'Valeurs d\'exemple de l\'élément')];
 }
 
@@ -520,7 +598,7 @@ function createModuleProperties(moduleId) {
     createNumberField('Largeur de l\'aperçu', screenSize.width, (width) => updatePreviewSize('width', width), { min: 40 }),
     createNumberField('Hauteur de l\'aperçu', screenSize.height, (height) => updatePreviewSize('height', height), { min: 40 }),
     createTextField('Notes pour le codeur', module.notes, (newNotes) => updateNode(moduleId, (targetModule) => { targetModule.notes = newNotes; }), { isMultiline: true }),
-  ])];
+  ]), createModuleStatesSection(moduleId)];
 }
 
 /**
@@ -639,7 +717,8 @@ export function renderLeftPanel() {
         'Sélectionne un élément dans la fenêtre centrale (Pencil, souris ou tap du doigt).<br><br>'
         + 'Le titre au-dessus du cadre sélectionne l\'écran.<br>Glisse un widget de la bibliothèque (à droite) dans une area, '
         + 'ou touche-le puis touche l\'area.<br><br>Doigt : glisser = déplacer la vue, 2 doigts = zoom.' }));
-    } else if (record.kind === 'screen') panelBodyElement.append(...createScreenProperties(record.node));
+    } else if (appState.editedStateId && record.screen.id === appState.editedModuleId) panelBodyElement.append(...createStateProperties());
+    else if (record.kind === 'screen') panelBodyElement.append(...createScreenProperties(record.node));
     else if (record.kind === 'module') panelBodyElement.append(...createModuleProperties(selectedId));
     else if (record.kind === 'area') panelBodyElement.append(...createAreaProperties(record.node, record));
     else panelBodyElement.append(...createWidgetProperties(record.node, record));
