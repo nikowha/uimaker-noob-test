@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <!-- Empêche une iframe de partir vers une autre adresse (le sandbox ne le fait pas). -->
+  <script>if (!location.search.includes('temoin')) document.write('<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">');</script>
+  <title>Essai custom widgets</title>
+  <style>
+    body { margin: 0; padding: 16px; background: #18191c; color: #e6e7ea; font: 15px/1.5 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    h2 { font-size: 16px; margin: 20px 0 6px; }
+    #grid { display: grid; grid-template-columns: repeat(10, minmax(84px, 1fr)); gap: 8px; }
+    iframe { border: 1px solid #34373e; border-radius: 8px; background: transparent; width: 100%; height: 108px; display: block; }
+    .hidden-frame { position: fixed; left: -2000px; top: 0; width: 200px; height: 100px; }
+    li { margin: 2px 0; } .ok { color: #6ddc91; } .bad { color: #ff7a7e; } .wait { color: #a3a7af; }
+    #pointer { white-space: pre-line; font-family: ui-monospace, monospace; font-size: 13px; background: #212328; padding: 8px; border-radius: 8px; min-height: 96px; }
+    button, input { min-height: 44px; margin-right: 8px; }
+    input[type=range] { width: 300px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>Essai custom widgets</h1>
+  <div id="agent"></div>
+  <h2>1. Sécurité (automatique)</h2>
+  <ul id="security"></ul>
+  <h2>2. 20 potards : tourne-les au Pencil, puis au doigt</h2>
+  <div id="grid"></div>
+  <p><label>Valeur envoyée aux 20 : <input id="all" type="range" min="0" max="100" value="50"></label> <span id="latency"></span></p>
+  <div id="pointer">Pas encore de geste.</div>
+  <h2>3. Fluidité</h2>
+  <button id="animate">Animer les 20 pendant 4 s</button><button id="freeze">Bloquer un widget 2 s</button>
+  <ul id="performance"></ul>
+  <script type="module">
+    const WIDGET_POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'";
+    const TARGET_URL = new URL('./essai-widgets-cible.html', location.href).href;
+    const WIDGET_COUNT = 20;
+    const policyTag = `<meta http-equiv="Content-Security-Policy" content="${WIDGET_POLICY}">`;
+
+    /** Essais d'évasion lancés dans l'iframe. Chaque résultat : true = passé (mauvais avec la protection). */
+    const PROBE_SCRIPT = `
+      const target = ${JSON.stringify(TARGET_URL)};
+      const withTimeout = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(false), 2500))]);
+      const loads = (element, attribute) => new Promise((resolve) => { element.onload = () => resolve(true); element.onerror = () => resolve(false); element[attribute] = target.replace('essai-widgets-cible.html', 'icon-180.png') + '?' + Math.random(); document.body && document.body.append(element); });
+      const tests = {
+        parentPage: async () => { try { return Boolean(parent.document.body); } catch (error) { return false; } },
+        storage: async () => { try { localStorage.setItem('x', '1'); return true; } catch (error) { return false; } },
+        fetch: () => fetch(target, { mode: 'no-cors', cache: 'no-store' }).then(() => true, () => false),
+        request: () => new Promise((resolve) => { const request = new XMLHttpRequest(); request.onload = () => resolve(true); request.onerror = () => resolve(false); try { request.open('GET', target); request.send(); } catch (error) { resolve(false); } }),
+        image: () => loads(new Image(), 'src'),
+        socket: () => new Promise((resolve) => { try { const socket = new WebSocket('wss://' + new URL(target).host + '/x'); let isRefused = false; document.addEventListener('securitypolicyviolation', () => { isRefused = true; }); setTimeout(() => resolve(!isRefused), 800); socket.onerror = () => {}; } catch (error) { resolve(false); } }),
+        popup: async () => { try { const opened = window.open(target); if (opened) opened.close(); return Boolean(opened); } catch (error) { return false; } },
+        code: async () => { try { new Function('return 1')(); return true; } catch (error) { return false; } },
+      };
+      (async () => {
+        const results = {};
+        for (const [name, run] of Object.entries(tests)) { try { results[name] = await withTimeout(run()); } catch (error) { results[name] = false; } }
+        parent.postMessage({ kind: 'probe', results }, '*');
+      })();`;
+
+    const KNOB_SOURCE = `<!doctype html><html><head>${policyTag}<style>
+      html,body{margin:0;height:100%;overflow:hidden;touch-action:none;background:transparent;color:#e6e7ea;font:12px system-ui;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+      svg{display:block;width:100%;height:84px}div{text-align:center}</style></head><body>
+      <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="30" fill="#2a2d33" stroke="#4c8dff" stroke-width="3"/><line id="needle" x1="40" y1="40" x2="40" y2="14" stroke="#ffb224" stroke-width="5" stroke-linecap="round"/></svg><div id="text">50</div>
+      <script>
+        let value = 50, lastY = null, moveCount = 0;
+        const draw = () => { document.getElementById('needle').setAttribute('transform', 'rotate(' + (value * 2.7 - 135) + ' 40 40)'); document.getElementById('text').textContent = Math.round(value); };
+        const report = (event) => parent.postMessage({ kind: 'pointer', step: event.type, pointerType: event.pointerType, pressure: event.pressure, tiltX: event.tiltX, tiltY: event.tiltY, merged: event.getCoalescedEvents ? event.getCoalescedEvents().length : 0, moveCount, value, isOutside: event.clientY < 0 || event.clientY > innerHeight }, '*');
+        addEventListener('pointerdown', (event) => { event.preventDefault(); lastY = event.clientY; moveCount = 0; try { document.body.setPointerCapture(event.pointerId); } catch (error) {} report(event); });
+        addEventListener('pointermove', (event) => { if (lastY === null) return; moveCount += 1; value = Math.max(0, Math.min(100, value + lastY - event.clientY)); lastY = event.clientY; draw(); report(event); });
+        for (const name of ['pointerup', 'pointercancel']) addEventListener(name, (event) => { lastY = null; report(event); });
+        addEventListener('contextmenu', (event) => event.preventDefault());
+        addEventListener('message', (event) => {
+          if (event.data.kind === 'set') { value = event.data.value; draw(); parent.postMessage({ kind: 'done', sentAt: event.data.sentAt }, '*'); }
+          if (event.data.kind === 'freeze') { const endTime = performance.now() + 2000; while (performance.now() < endTime); }
+        });
+        draw(); parent.postMessage({ kind: 'ready' }, '*');
+      <\/script></body></html>`;
+
+    /**
+     * Crée une iframe isolée.
+     * @param {string} source page
+     * @param {string} className classe
+     * @returns {HTMLIFrameElement} iframe
+     */
+    function createFrame(source, className = '') {
+      const frame = document.createElement('iframe');
+      frame.className = className;
+      frame.setAttribute('sandbox', 'allow-scripts');
+      frame.srcdoc = source;
+      return frame;
+    }
+
+    /**
+     * Ajoute une ligne de résultat.
+     * @param {string} listId liste
+     * @param {string} text texte
+     * @param {'ok'|'bad'|'wait'} state état
+     */
+    function addResult(listId, text, state) {
+      const line = document.createElement('li');
+      line.className = state;
+      line.textContent = `${state === 'ok' ? '✓' : state === 'bad' ? '✗' : '…'} ${text}`;
+      document.getElementById(listId).append(line);
+    }
+
+    /**
+     * Attend un message d'une iframe.
+     * @param {HTMLIFrameElement} frame iframe
+     * @param {string} kind type de message
+     * @param {number} timeout délai en ms
+     * @returns {Promise<object|null>} message, ou null
+     */
+    function waitForMessage(frame, kind, timeout) {
+      return new Promise((resolve) => {
+        const listen = (event) => { if (event.source === frame.contentWindow && event.data?.kind === kind) finish(event.data); };
+        const finish = (data) => { removeEventListener('message', listen); clearTimeout(timerId); resolve(data); };
+        const timerId = setTimeout(() => finish(null), timeout);
+        addEventListener('message', listen);
+      });
+    }
+
+    /**
+     * Lance les essais d'évasion dans une iframe.
+     * @param {string} headTag balise ajoutée (protection ou rien)
+     * @returns {Promise<object|null>} résultats
+     */
+    async function runProbe(headTag) {
+      const frame = createFrame(`<!doctype html><html><head>${headTag}</head><body><script>${PROBE_SCRIPT}<\/script></body></html>`, 'hidden-frame');
+      const answer = waitForMessage(frame, 'probe', 25000);
+      document.body.append(frame);
+      const data = await answer;
+      frame.remove();
+      return data?.results ?? null;
+    }
+
+    /** Essaie de faire partir une iframe vers une autre page. */
+    async function runNavigationTest() {
+      const frame = createFrame(`<!doctype html><html><head>${policyTag}</head><body><script>location.href = ${JSON.stringify(TARGET_URL)};<\/script></body></html>`, 'hidden-frame');
+      const answer = waitForMessage(frame, 'targetLoaded', 4000);
+      document.body.append(frame);
+      const hasEscaped = Boolean(await answer);
+      frame.remove();
+      return hasEscaped;
+    }
+
+    /** Sécurité. */
+    async function runSecurity() {
+      const labels = { parentPage: 'Lire la page de l\'app', storage: 'Lire le stockage', fetch: 'Réseau (fetch)', request: 'Réseau (XHR)', image: 'Réseau (image)', socket: 'Réseau (WebSocket)', popup: 'Ouvrir un onglet', code: 'Code fabriqué (eval)' };
+      const openResults = await runProbe('');
+      const protectedResults = await runProbe(policyTag);
+      if (!protectedResults) { addResult('security', 'L\'iframe isolée ne répond pas', 'bad'); return; }
+      for (const [name, label] of Object.entries(labels)) {
+        const witness = openResults ? (openResults[name] ? 'passe sans protection' : 'bloqué même sans protection') : 'témoin muet';
+        addResult('security', `${label} : ${protectedResults[name] ? 'PASSE' : 'bloqué'} (${witness})`, protectedResults[name] ? 'bad' : 'ok');
+      }
+      const hasEscaped = await runNavigationTest();
+      addResult('security', `Partir vers une autre page : ${hasEscaped ? 'PASSE' : 'bloqué'}`, hasEscaped ? 'bad' : 'ok');
+    }
+
+    const frames = [];
+    /** Crée les 20 potards. */
+    async function createKnobs() {
+      const startTime = performance.now();
+      let readyCount = 0;
+      const allReady = new Promise((resolve) => {
+        const timerId = setTimeout(resolve, 8000);
+        addEventListener('message', (event) => {
+          if (event.data?.kind === 'ready' && frames.some((frame) => frame.contentWindow === event.source)) { readyCount += 1; if (readyCount === WIDGET_COUNT) { clearTimeout(timerId); resolve(); } }
+        });
+      });
+      for (let index = 0; index < WIDGET_COUNT; index += 1) { const frame = createFrame(KNOB_SOURCE); frames.push(frame); document.getElementById('grid').append(frame); }
+      await allReady;
+      addResult('performance', `${readyCount} / ${WIDGET_COUNT} widgets prêts en ${Math.round(performance.now() - startTime)} ms`, readyCount === WIDGET_COUNT ? 'ok' : 'bad');
+    }
+
+    let pointerSummary = {};
+    addEventListener('message', (event) => {
+      const data = event.data;
+      if (data?.kind === 'pointer') {
+        if (data.step === 'pointerdown') pointerSummary = { minPressure: 1, maxPressure: 0, outside: false, steps: 0 };
+        pointerSummary.minPressure = Math.min(pointerSummary.minPressure, data.pressure);
+        pointerSummary.maxPressure = Math.max(pointerSummary.maxPressure, data.pressure);
+        pointerSummary.outside ||= data.isOutside;
+        document.getElementById('pointer').textContent = `Outil : ${data.pointerType}\nPression : ${pointerSummary.minPressure.toFixed(2)} à ${pointerSummary.maxPressure.toFixed(2)} ; inclinaison ${data.tiltX} / ${data.tiltY}\nMouvements : ${data.moveCount} ; sous-mouvements : ${data.merged}\nGeste suivi hors du widget : ${pointerSummary.outside ? 'oui' : 'non'} ; valeur ${Math.round(data.value)} ; ${data.step}`;
+      }
+      if (data?.kind === 'done') document.getElementById('latency').textContent = `aller-retour ${(performance.now() - data.sentAt).toFixed(1)} ms`;
+    });
+
+    const sendToAll = (value) => frames.forEach((frame) => frame.contentWindow.postMessage({ kind: 'set', value, sentAt: performance.now() }, '*'));
+    document.getElementById('all').addEventListener('input', (event) => sendToAll(Number(event.target.value)));
+    document.getElementById('animate').addEventListener('click', () => {
+      const startTime = performance.now();
+      let frameCount = 0;
+      const step = () => {
+        const elapsed = performance.now() - startTime;
+        sendToAll(50 + Math.sin(elapsed / 300) * 50);
+        frameCount += 1;
+        if (elapsed < 4000) requestAnimationFrame(step); else addResult('performance', `Animation : ${Math.round(frameCount / elapsed * 1000)} images/s`, frameCount / elapsed * 1000 > 45 ? 'ok' : 'bad');
+      };
+      step();
+    });
+    document.getElementById('freeze').addEventListener('click', () => {
+      let lastTime = performance.now();
+      let longestGap = 0;
+      const timerId = setInterval(() => { longestGap = Math.max(longestGap, performance.now() - lastTime); lastTime = performance.now(); }, 20);
+      frames[0].contentWindow.postMessage({ kind: 'freeze' }, '*');
+      setTimeout(() => { clearInterval(timerId); addResult('performance', `Widget bloqué 2 s : l'app a été figée ${Math.round(longestGap)} ms`, longestGap < 500 ? 'ok' : 'bad'); }, 2600);
+    });
+
+    document.getElementById('agent').textContent = navigator.userAgent;
+    await createKnobs();
+    await runSecurity();
+  </script>
+</body>
+</html>
