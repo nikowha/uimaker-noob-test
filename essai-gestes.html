@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="frame-src 'none'">
+  <title>Essai gestes</title>
+  <style>
+    body { margin: 0; padding: 16px; background: #18191c; color: #e6e7ea; font: 15px/1.5 system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .row { display: grid; grid-template-columns: 250px repeat(4, 110px); gap: 10px; align-items: center; margin-top: 10px; }
+    iframe { border: 1px solid #34373e; border-radius: 8px; width: 100%; height: 100px; display: block; }
+    #log { white-space: pre-line; font: 12px/1.35 ui-monospace, monospace; background: #212328; padding: 8px; border-radius: 8px; margin-top: 12px; min-height: 180px; }
+  </style>
+</head>
+<body>
+  <h1>Essai gestes</h1>
+  <div>Sur chaque ligne : tourne plusieurs fois le même potard, change de potard, clique deux fois vite. Pencil puis doigt. Quelle ligne ne se bloque jamais ?</div>
+  <div id="rows"></div>
+  <div id="log">Derniers événements</div>
+  <script type="module">
+    /** Une variante = ce qui est ajouté au suivi de base (window pointerdown / move / up). */
+    const VARIANTS = [
+      { label: 'A — sans capture', setup: '' },
+      { label: 'B — capture sur le dessin', setup: 'onStart = (event) => { const svg = document.querySelector("svg"); try { svg.setPointerCapture(event.pointerId); } catch (error) {} }; onEnd = (event) => { const svg = document.querySelector("svg"); try { svg.releasePointerCapture(event.pointerId); } catch (error) {} };' },
+      { label: 'C — sans capture, geste système coupé', setup: 'for (const name of ["touchstart", "touchmove", "touchend"]) document.addEventListener(name, (event) => event.preventDefault(), { passive: false });' },
+      { label: 'D — capture sur body (essai d\'avant)', setup: 'onStart = (event) => { event.preventDefault(); try { document.body.setPointerCapture(event.pointerId); } catch (error) {} };' },
+    ];
+    const POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'";
+
+    /**
+     * Page d'un potard.
+     * @param {object} variant variante
+     * @param {string} name nom affiché dans le journal
+     * @returns {string} HTML
+     */
+    function createKnobSource(variant, name) {
+      return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${POLICY}"><style>
+        html,body{margin:0;height:100%;overflow:hidden;color:#e6e7ea;font:12px system-ui}*{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+        svg{display:block;width:100%;height:78px}div{text-align:center}</style></head><body>
+        <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="30" fill="#2a2d33" stroke="#4c8dff" stroke-width="3"/><line id="needle" x1="40" y1="40" x2="40" y2="14" stroke="#ffb224" stroke-width="5"/></svg><div id="text">50</div>
+        <script>
+          let value = 50, activeId = null, lastY = 0, onStart = () => {}, onEnd = () => {};
+          const send = (event) => parent.postMessage({ kind: 'event', name: '${name}', type: event.type, pointerType: event.pointerType || '', id: event.pointerId, value }, '*');
+          ${variant.setup}
+          const draw = () => { document.getElementById('needle').setAttribute('transform', 'rotate(' + (value * 2.7 - 135) + ' 40 40)'); document.getElementById('text').textContent = Math.round(value); };
+          addEventListener('pointerdown', (event) => { activeId = event.pointerId; lastY = event.clientY; onStart(event); send(event); });
+          addEventListener('pointermove', (event) => { if (event.pointerId !== activeId) return; value = Math.max(0, Math.min(100, value + lastY - event.clientY)); lastY = event.clientY; draw(); send(event); });
+          for (const type of ['pointerup', 'pointercancel']) addEventListener(type, (event) => { if (event.pointerId === activeId) { activeId = null; onEnd(event); } send(event); });
+          addEventListener('lostpointercapture', send, true);
+          addEventListener('dblclick', (event) => { event.preventDefault(); send(event); });
+          addEventListener('selectstart', (event) => event.preventDefault());
+          addEventListener('contextmenu', (event) => event.preventDefault());
+          draw();
+        <\/script></body></html>`;
+    }
+
+    const rowsElement = document.getElementById('rows');
+    for (const variant of VARIANTS) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('b');
+      label.textContent = variant.label;
+      row.append(label);
+      for (let index = 1; index <= 4; index += 1) {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.srcdoc = createKnobSource(variant, variant.label[0] + index);
+        row.append(frame);
+      }
+      rowsElement.append(row);
+    }
+
+    const lines = [];
+    addEventListener('message', (event) => {
+      const data = event.data;
+      if (data?.kind !== 'event') return;
+      const text = `${data.name} ${data.type} ${data.pointerType} #${data.id}`;
+      const lastLine = lines[lines.length - 1];
+      if (data.type === 'pointermove' && lastLine?.text === text) lastLine.count += 1; else lines.push({ text, count: 1 });
+      if (lines.length > 24) lines.shift();
+      document.getElementById('log').textContent = lines.map((line) => line.text + (line.count > 1 ? ` ×${line.count}` : '')).join('\n');
+    });
+  </script>
+</body>
+</html>
