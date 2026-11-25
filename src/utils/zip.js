@@ -1,4 +1,4 @@
-// Écriture d'un fichier zip sans compression ni dépendance (PROTOTYPE).
+// Écriture (sans compression) et lecture de fichiers zip, sans dépendance (PROTOTYPE).
 
 const LOCAL_HEADER_SIZE = 30;
 const CENTRAL_HEADER_SIZE = 46;
@@ -76,4 +76,45 @@ export async function createZip(files) {
   endRecord.setUint32(12, centralSize, true);
   endRecord.setUint32(16, offset, true);
   return new Blob([...parts, ...centralParts, endRecord], { type: 'application/zip' });
+}
+
+/**
+ * Indique si des données sont un zip.
+ * @param {Uint8Array} bytes données
+ * @returns {boolean} vrai pour un zip
+ */
+export function isZipBytes(bytes) {
+  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 3 && bytes[3] === 4;
+}
+
+/**
+ * Lit un fichier d'un zip (stocké ou compressé).
+ * @param {Uint8Array} bytes zip
+ * @param {(path: string) => boolean} isWanted choisit le fichier (le premier trouvé)
+ * @returns {Promise<Uint8Array|null>} contenu, ou null si absent
+ */
+export async function readZipFile(bytes, isWanted) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let endOffset = bytes.length - END_RECORD_SIZE;
+  while (endOffset >= 0 && view.getUint32(endOffset, true) !== 0x06054b50) endOffset -= 1;
+  if (endOffset < 0) throw new Error('zip abîmé');
+  let offset = view.getUint32(endOffset + 16, true);
+  for (let fileIndex = view.getUint16(endOffset + 10, true); fileIndex > 0; fileIndex -= 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error('zip abîmé');
+    const method = view.getUint16(offset + 10, true);
+    const size = view.getUint32(offset + 20, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const path = new TextDecoder().decode(bytes.subarray(offset + CENTRAL_HEADER_SIZE, offset + CENTRAL_HEADER_SIZE + nameLength));
+    if (isWanted(path)) {
+      const start = localOffset + LOCAL_HEADER_SIZE + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+      const content = bytes.subarray(start, start + size);
+      if (method === 0) return content;
+      if (method !== 8) throw new Error('compression du zip non prise en charge');
+      const inflatedStream = new Blob([content]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(inflatedStream).arrayBuffer());
+    }
+    offset += CENTRAL_HEADER_SIZE + nameLength + view.getUint16(offset + 30, true) + view.getUint16(offset + 32, true);
+  }
+  return null;
 }

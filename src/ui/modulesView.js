@@ -1,5 +1,5 @@
 // Fenêtre de droite, section « Modules » : modules du projet et bibliothèque commune (PROTOTYPE).
-import { createElement, pickTextFile, saveTextFile } from '../utils/dom.js';
+import { createElement, pickTextFile, saveFile } from '../utils/dom.js';
 import { appState, commitChange, notifyChange } from '../model/store.js';
 import { createEmptyDocument } from '../model/document.js';
 import { countModuleInstances, installLibraryEntry, isModuleUpdateAvailable } from '../model/modules.js';
@@ -82,7 +82,7 @@ function reportLibraryError(actionName, error) {
  * @param {string} baseName nom du fichier sans extension
  */
 function exportModules(entries, baseName) {
-  saveTextFile(`${baseName.replace(/[^\w-]+/g, '_')}.uimodules`, createModuleFileText(entries), 'application/json');
+  saveFile(`${baseName.replace(/[^\w-]+/g, '_')}.uimodules`, createModuleFileText(entries), 'application/json');
 }
 
 /** Choisit et importe un fichier .uimodules. */

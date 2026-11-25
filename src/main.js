@@ -1,6 +1,7 @@
 // Démarrage de UImaker_noob (PROTOTYPE) : assemble les 4 fenêtres et branche le clavier.
 import { appState, notifyChange, stepHistory, subscribeToChanges } from './model/store.js';
 import { startProjects } from './model/projects.js';
+import { closeExportWindow, isExportWindowOpen } from './ui/exportWindow.js';
 import { closeProjectsWindow, isProjectsWindowOpen } from './ui/projectsWindow.js';
 import { createTopBar, renderTopBar } from './ui/topBar.js';
 import { createLeftPanel, renderLeftPanel } from './ui/leftPanel.js';
@@ -23,7 +24,7 @@ function isTypingTarget(eventTarget) {
  * @param {KeyboardEvent} keyboardEvent événement
  */
 function handleKeyDown(keyboardEvent) {
-  if (isProjectsWindowOpen()) { if (keyboardEvent.key === 'Escape') closeProjectsWindow(); return; }
+  if (isProjectsWindowOpen()) { if (keyboardEvent.key === 'Escape') { if (isExportWindowOpen()) closeExportWindow(); else closeProjectsWindow(); } return; }
   if (isTypingTarget(keyboardEvent.target)) return;
   const isCommand = keyboardEvent.ctrlKey || keyboardEvent.metaKey;
   const lowerKey = keyboardEvent.key.toLowerCase();

@@ -1,5 +1,5 @@
 // Fenêtre « Projets » : liste, versions, corbeille, fichiers de sauvegarde (PROTOTYPE).
-import { createElement, pickTextFile } from '../utils/dom.js';
+import { createElement, pickFile } from '../utils/dom.js';
 import { appState } from '../model/store.js';
 import { normalizeImportedDocument } from '../model/document.js';
 import { TEMPLATE_CATEGORIES } from '../model/templates.js';
@@ -9,6 +9,7 @@ import {
 } from '../model/projects.js';
 import { readVersions } from '../io/projectDatabase.js';
 import { importProjectFile, isProjectFile, saveBackupFile, saveOneProjectFile } from '../io/projectFiles.js';
+import { isZipBytes, readZipFile } from '../utils/zip.js';
 import { parseUiSpecImport } from '../io/uispecExport.js';
 import { renderScreen } from '../render/screenRenderer.js';
 import { createButtonRow, createSelectElement } from './fields.js';
@@ -160,12 +161,26 @@ function createTrashRow(record) {
 }
 
 /**
- * Importe un fichier choisi : .uimnoob (projets) ou ui.json (au choix : nouveau projet ou remplacement).
+ * Lit le texte d'un fichier importé ; dans un zip exporté, celui de ui.json.
+ * @param {File} chosenFile fichier
+ * @returns {Promise<string>} JSON
+ */
+async function readImportedText(chosenFile) {
+  const bytes = new Uint8Array(await chosenFile.arrayBuffer());
+  if (!isZipBytes(bytes)) return new TextDecoder().decode(bytes);
+  const uiJsonBytes = await readZipFile(bytes, (path) => /(^|\/)ui\.json$/.test(path) && !path.startsWith('__MACOSX'));
+  if (!uiJsonBytes) throw new Error('ce zip ne contient pas de ui.json');
+  return new TextDecoder().decode(uiJsonBytes);
+}
+
+/**
+ * Importe un fichier choisi : .uimnoob (projets), ui.json ou zip exporté (au choix : nouveau projet ou remplacement).
  */
 export async function importFile() {
-  const fileText = await pickTextFile();
-  if (fileText === null) return;
+  const chosenFile = await pickFile();
+  if (!chosenFile) return;
   await runAction('Import impossible', async () => {
+    const fileText = await readImportedText(chosenFile);
     let fileValue;
     try { fileValue = JSON.parse(fileText); } catch (error) { throw new Error(`JSON illisible : ${error.message}`); }
     if (isProjectFile(fileValue)) { await importProjects(fileValue); return; }
@@ -240,7 +255,7 @@ function createProjectsView(records) {
   (choice) => { if (choice) runAction('Création impossible', () => openAndClose(() => createProject(choice === 'empty' ? null : choice.slice('template:'.length)))); });
   return [
     createElement('div', { className: 'projects-actions' }, [newProjectSelect, createButtonRow([
-      { label: 'Importer un fichier…', title: 'Fichier .uimnoob ou ui.json', onClick: importFile },
+      { label: 'Importer un fichier…', title: 'Fichier .uimnoob, ui.json ou zip exporté', onClick: importFile },
       { label: 'Tout sauvegarder', title: 'Tous les projets et la bibliothèque de modules dans un fichier .uimnoob', onClick: () => runAction('Sauvegarde impossible', () => saveBackupFile(activeRecords)) },
     ])]),
     createElement('div', { className: 'panel-hint', text: 'Les projets sont gardés dans ce navigateur. Un fichier (Sauvegarder) les met à l\'abri et sert à passer de l\'iPad au PC.' }),

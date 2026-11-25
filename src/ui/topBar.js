@@ -1,14 +1,14 @@
 // Fenêtre du haut : projet, écrans, thème affiché, annuler / rétablir, zoom, import / export (PROTOTYPE).
-import { createElement, saveTextFile } from '../utils/dom.js';
+import { createElement } from '../utils/dom.js';
 import { appState, commitChange, notifyChange, selectNode, showScreen, stepHistory } from '../model/store.js';
 import { SCREEN_PRESETS } from '../model/catalog.js';
 import { createScreen } from '../model/document.js';
 import { getSaveStatus, isBackupDue, retryWritableProject, saveOpenedProject, subscribeToSaveStatus } from '../model/projects.js';
-import { buildUiSpecExport } from '../io/uispecExport.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import { createSelectElement } from './fields.js';
 import { fitScreenInView, zoomFromButton } from './canvasView.js';
 import { importFile, openProjectsWindow } from './projectsWindow.js';
+import { openExportWindow } from './exportWindow.js';
 import { openTestMode } from './testMode.js';
 
 const ZOOM_STEP = 1.25;
@@ -59,18 +59,6 @@ function updateSaveStatus() {
 function createToolbarButton(iconName, title, onClick, label) {
   return createElement('button', { className: 'top-button', attributes: { type: 'button', title },
     on: { click: onClick } }, [createElement('span', { className: 'top-button-icon', html: getIconSvg(`lucide:${iconName}`) }), label ? createElement('span', { text: label }) : null]);
-}
-
-/** Exporte ui.json (téléchargement sur PC, partage sur iPad). */
-async function exportUiSpec() {
-  try {
-    const uiSpec = await buildUiSpecExport(appState.uiDocument);
-    const safeName = (appState.uiDocument.project.name || 'project').replace(/[^\w-]+/g, '_');
-    await saveTextFile(`${safeName}_ui.json`, JSON.stringify(uiSpec, null, 2), 'application/json');
-  } catch (error) {
-    console.error('exportUiSpec', error);
-    alert(`Export impossible : ${error.message}`);
-  }
 }
 
 /**
@@ -125,8 +113,8 @@ export function renderTopBar() {
     createElement('span', { className: 'top-spacer' }),
     createToolbarButton('play', 'Tester l\'UI (plein écran, manipulable, sans modifier le projet)', openTestMode, 'Tester'),
     createToolbarButton('circle-question-mark', 'Aide : paramètres des widgets et des areas (nouvel onglet)', () => window.open('./help.html', '_blank')),
-    createToolbarButton('file-down', 'Importer un fichier (ui.json ou projets .uimnoob)', importFile, 'Importer'),
-    createToolbarButton('file-up', 'Exporter ui.json (spec UI pour une autre session)', exportUiSpec, 'Exporter'),
+    createToolbarButton('file-down', 'Importer un fichier (ui.json, zip exporté ou projets .uimnoob)', importFile, 'Importer'),
+    createToolbarButton('file-up', 'Exporter (zip ou ui.json, pour une autre session)', openExportWindow, 'Exporter'),
     createToolbarButton('panel-right', 'Afficher / replier la fenêtre de droite', () => document.body.classList.toggle('is-right-collapsed')),
   );
 }

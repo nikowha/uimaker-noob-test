@@ -26,14 +26,14 @@ export function createElement(tagName, options = {}, children = []) {
 }
 
 /**
- * Télécharge (PC) ou partage (iPad) un fichier texte.
+ * Télécharge (PC) ou partage (iPad) un fichier.
  * @param {string} fileName nom du fichier
- * @param {string} fileText contenu
+ * @param {string|Blob} fileContent contenu
  * @param {string} mimeType type MIME
  * @returns {Promise<boolean>} faux si l'utilisateur a annulé le partage
  */
-export async function saveTextFile(fileName, fileText, mimeType) {
-  const fileBlob = new Blob([fileText], { type: mimeType });
+export async function saveFile(fileName, fileContent, mimeType) {
+  const fileBlob = new Blob([fileContent], { type: mimeType });
   const sharedFile = new File([fileBlob], fileName, { type: mimeType });
   const isTouchDevice = navigator.maxTouchPoints > 1;
   if (isTouchDevice && navigator.canShare?.({ files: [sharedFile] })) {
@@ -42,7 +42,7 @@ export async function saveTextFile(fileName, fileText, mimeType) {
       return true;
     } catch (error) {
       if (error.name === 'AbortError') return false;
-      console.error('saveTextFile (partage)', error);
+      console.error('saveFile (partage)', error);
     }
   }
   const downloadUrl = URL.createObjectURL(fileBlob);
@@ -55,18 +55,26 @@ export async function saveTextFile(fileName, fileText, mimeType) {
 }
 
 /**
- * Ouvre le sélecteur de fichiers et lit le fichier choisi en texte.
- * @returns {Promise<string|null>} texte, ou null si annulé
+ * Ouvre le sélecteur de fichiers.
+ * @returns {Promise<File|null>} fichier choisi, ou null
  */
-export function pickTextFile() {
+export function pickFile() {
   return new Promise((resolvePromise) => {
     const fileInput = createElement('input', { attributes: { type: 'file' }, style: { display: 'none' } });
-    fileInput.addEventListener('change', async () => {
+    fileInput.addEventListener('change', () => {
       const chosenFile = fileInput.files?.[0];
       fileInput.remove();
-      resolvePromise(chosenFile ? await chosenFile.text() : null);
+      resolvePromise(chosenFile ?? null);
     });
     document.body.append(fileInput);
     fileInput.click();
   });
+}
+
+/**
+ * Ouvre le sélecteur de fichiers et lit le fichier choisi en texte.
+ * @returns {Promise<string|null>} texte, ou null si annulé
+ */
+export async function pickTextFile() {
+  return (await pickFile())?.text() ?? null;
 }

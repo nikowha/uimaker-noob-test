@@ -3,7 +3,7 @@ import { normalizeImportedDocument } from '../model/document.js';
 import { addImportedVersions, addProject, markFileSaved, replaceProject } from '../model/projects.js';
 import { createModuleFileText, importModuleFile, listLibraryEntries } from './moduleLibrary.js';
 import { readAllProjects, readVersions } from './projectDatabase.js';
-import { saveTextFile } from '../utils/dom.js';
+import { saveFile } from '../utils/dom.js';
 
 const PROJECT_FILE_FORMAT = 'uimaker-noob-projects';
 const PROJECT_FILE_FORMAT_VERSION = '1';
@@ -21,7 +21,7 @@ async function saveProjectFile(records, moduleEntries, baseName) {
     projects.push({ id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt, document: record.document, versions });
   }
   const fileText = JSON.stringify({ format: PROJECT_FILE_FORMAT, formatVersion: PROJECT_FILE_FORMAT_VERSION, savedAt: new Date().toISOString(), projects, modules: moduleEntries });
-  const isSaved = await saveTextFile(`${baseName.replace(/[^\p{L}\p{N}_-]+/gu, '_')}.uimnoob`, fileText, 'application/json');
+  const isSaved = await saveFile(`${baseName.replace(/[^\p{L}\p{N}_-]+/gu, '_')}.uimnoob`, fileText, 'application/json');
   if (isSaved) await markFileSaved(records);
 }
 
