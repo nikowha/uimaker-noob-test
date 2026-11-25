@@ -125,7 +125,7 @@ async function acquireProjectLock(projectId, attempts = 1) {
  */
 async function runWithProjectLock(projectId, work) {
   if (projectId === openedRecord?.id && !appState.isReadOnly) return work();
-  const release = await acquireProjectLock(projectId);
+  const release = await acquireProjectLock(projectId, LOCK_ATTEMPTS);
   if (!release) throw new Error('ce projet est ouvert dans un autre onglet');
   try { return await work(); } finally { release(); }
 }
@@ -404,6 +404,25 @@ export async function duplicateProject(projectId) {
   if (projectId === openedRecord?.id && !appState.isReadOnly) await saveOpenedProject();
   const record = await readProject(projectId);
   if (record) await addProject(record.document);
+}
+
+/**
+ * Indique si un projet est un projet vide jamais modifié (son nom ne compte pas).
+ * @param {object} record projet
+ * @returns {boolean} vrai s'il est vide
+ */
+export function isUntouchedProject(record) {
+  const readWithoutName = (uiDocument) => {
+    const normalizedDocument = normalizeImportedDocument(uiDocument);
+    normalizedDocument.project.name = '';
+    return JSON.stringify(normalizedDocument);
+  };
+  try {
+    return readWithoutName(record.document) === readWithoutName(createEmptyDocument());
+  } catch (error) {
+    console.error('isUntouchedProject', error);
+    return false;
+  }
 }
 
 /**

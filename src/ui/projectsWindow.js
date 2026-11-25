@@ -4,7 +4,7 @@ import { appState } from '../model/store.js';
 import { normalizeImportedDocument } from '../model/document.js';
 import { TEMPLATE_CATEGORIES } from '../model/templates.js';
 import {
-  addProject, createProject, deleteVersion, duplicateProject, eraseProjectForever, getOpenedProjectId, isRecordBackupDue, keepVersion, listProjects,
+  addProject, createProject, deleteVersion, duplicateProject, eraseProjectForever, getOpenedProjectId, isRecordBackupDue, isUntouchedProject, keepVersion, listProjects,
   moveProjectToTrash, openProject, renameProject, replaceOpenedDocument, restoreProjectFromTrash, restoreVersion, TRASH_DAYS,
 } from '../model/projects.js';
 import { readVersions } from '../io/projectDatabase.js';
@@ -107,9 +107,11 @@ function createProjectPreview(record) {
 /**
  * Crée la carte d'un projet.
  * @param {object} record projet
+ * @param {boolean} isLast vrai si c'est le seul projet
  * @returns {HTMLElement} carte
  */
-function createProjectCard(record) {
+function createProjectCard(record, isLast) {
+  const isLastEmpty = isLast && isUntouchedProject(record);
   const isOpened = record.id === getOpenedProjectId();
   const openThisProject = () => runAction('Ouverture impossible', () => openAndClose(() => openProject(record.id)));
   const nameInput = createElement('input', { className: 'project-card-name', attributes: { type: 'text', title: 'Nom du projet', 'aria-label': 'Nom du projet' }, on: {
@@ -130,10 +132,12 @@ function createProjectCard(record) {
       { label: 'Sauvegarder', title: 'Enregistrer ce projet dans un fichier .uimnoob', onClick: () => runAction('Sauvegarde impossible', () => saveOneProjectFile(record)) },
       { label: 'Versions', title: 'Anciennes copies de ce projet', onClick: () => runAction('Versions illisibles', async () => { versionsProjectId = record.id; }) },
       { label: 'Dupliquer', onClick: () => runAction('Copie impossible', () => duplicateProject(record.id)) },
-      { label: 'Supprimer', isDanger: true, title: `Mettre à la corbeille (${TRASH_DAYS} jours)`, onClick: () => {
-        if (confirm(`Mettre « ${record.name} » à la corbeille ? Il y reste ${TRASH_DAYS} jours.`)) runAction('Suppression impossible', () => moveProjectToTrash(record.id));
-      } },
+      ...(isLastEmpty ? [] : [{ label: 'Supprimer', isDanger: true, title: `Mettre à la corbeille (${TRASH_DAYS} jours)`, onClick: () => {
+        const lastText = isLast ? '\nC\'est ton seul projet : un projet vide « MyApp » sera créé à la place.' : '';
+        if (confirm(`Mettre « ${record.name} » à la corbeille ? Il y reste ${TRASH_DAYS} jours.${lastText}`)) runAction('Suppression impossible', () => moveProjectToTrash(record.id));
+      } }]),
     ]),
+    isLastEmpty ? createElement('div', { className: 'panel-hint', text: 'Seul projet, et vide : il faut toujours un projet ouvert. Il pourra être supprimé dès qu\'il y en aura un autre.' }) : null,
   ]);
 }
 
@@ -240,7 +244,7 @@ function createProjectsView(records) {
       { label: 'Tout sauvegarder', title: 'Tous les projets et la bibliothèque de modules dans un fichier .uimnoob', onClick: () => runAction('Sauvegarde impossible', () => saveBackupFile(activeRecords)) },
     ])]),
     createElement('div', { className: 'panel-hint', text: 'Les projets sont gardés dans ce navigateur. Un fichier (Sauvegarder) les met à l\'abri et sert à passer de l\'iPad au PC.' }),
-    createElement('div', { className: 'projects-grid' }, activeRecords.map(createProjectCard)),
+    createElement('div', { className: 'projects-grid' }, activeRecords.map((record) => createProjectCard(record, activeRecords.length === 1))),
     trashRecords.length ? createElement('details', { className: 'projects-trash' }, [createElement('summary', { text: `Corbeille (${trashRecords.length})` }), ...trashRecords.map(createTrashRow)]) : null,
   ];
 }
