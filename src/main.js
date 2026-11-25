@@ -1,5 +1,7 @@
 // Démarrage de UImaker_noob (PROTOTYPE) : assemble les 4 fenêtres et branche le clavier.
-import { appState, loadInitialDocument, notifyChange, stepHistory, subscribeToChanges } from './model/store.js';
+import { appState, notifyChange, stepHistory, subscribeToChanges } from './model/store.js';
+import { startProjects } from './model/projects.js';
+import { closeProjectsWindow, isProjectsWindowOpen } from './ui/projectsWindow.js';
 import { createTopBar, renderTopBar } from './ui/topBar.js';
 import { createLeftPanel, renderLeftPanel } from './ui/leftPanel.js';
 import { createRightPanel, renderRightPanel } from './ui/rightPanel.js';
@@ -21,6 +23,7 @@ function isTypingTarget(eventTarget) {
  * @param {KeyboardEvent} keyboardEvent événement
  */
 function handleKeyDown(keyboardEvent) {
+  if (isProjectsWindowOpen()) { if (keyboardEvent.key === 'Escape') closeProjectsWindow(); return; }
   if (isTypingTarget(keyboardEvent.target)) return;
   const isCommand = keyboardEvent.ctrlKey || keyboardEvent.metaKey;
   const lowerKey = keyboardEvent.key.toLowerCase();
@@ -40,8 +43,8 @@ function renderAll() {
 }
 
 /** Assemble l'application. */
-function startApplication() {
-  loadInitialDocument();
+async function startApplication() {
+  await startProjects();
   const appRoot = document.getElementById('app');
   appRoot.append(createTopBar(), createLeftPanel(), createCanvasView(), createRightPanel());
   subscribeToChanges(renderAll);

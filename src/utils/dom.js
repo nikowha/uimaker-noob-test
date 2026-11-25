@@ -30,6 +30,7 @@ export function createElement(tagName, options = {}, children = []) {
  * @param {string} fileName nom du fichier
  * @param {string} fileText contenu
  * @param {string} mimeType type MIME
+ * @returns {Promise<boolean>} faux si l'utilisateur a annulé le partage
  */
 export async function saveTextFile(fileName, fileText, mimeType) {
   const fileBlob = new Blob([fileText], { type: mimeType });
@@ -38,9 +39,9 @@ export async function saveTextFile(fileName, fileText, mimeType) {
   if (isTouchDevice && navigator.canShare?.({ files: [sharedFile] })) {
     try {
       await navigator.share({ files: [sharedFile] });
-      return;
+      return true;
     } catch (error) {
-      if (error.name === 'AbortError') return;
+      if (error.name === 'AbortError') return false;
       console.error('saveTextFile (partage)', error);
     }
   }
@@ -50,6 +51,7 @@ export async function saveTextFile(fileName, fileText, mimeType) {
   downloadLink.click();
   downloadLink.remove();
   setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+  return true;
 }
 
 /**

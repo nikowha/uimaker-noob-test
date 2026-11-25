@@ -1,9 +1,10 @@
-// État de l'application : document, sélection, historique annuler / rétablir, sauvegarde locale (PROTOTYPE).
-import { createEmptyDocument, normalizeImportedDocument } from './document.js';
+// État de l'application : document, sélection, historique annuler / rétablir (PROTOTYPE). L'enregistrement est dans projects.js.
 
-const STORAGE_KEY = 'uimakerNoob.prototype.document';
+/** Ancienne sauvegarde unique (avant les projets) : lue une fois, jamais effacée. */
+export const LEGACY_DOCUMENT_STORAGE_KEY = 'uimakerNoob.prototype.document';
 const SETTINGS_STORAGE_KEY = 'uimakerNoob.settings';
 const HISTORY_LIMIT = 100;
+const READ_ONLY_MESSAGE = 'Lecture seule : ce projet est ouvert dans un autre onglet. Ferme-le, puis touche « Lecture seule » en haut.';
 const STATE_LOCK_MESSAGE = 'Tu modifies un état : repasse sur « Normal » (bandeau) pour changer la structure du module.';
 
 /** Réglages de l'application (pas du projet), gardés dans l'appareil. */
@@ -22,7 +23,7 @@ export const DEFAULT_APP_SETTINGS = {
 export const appSettings = { ...DEFAULT_APP_SETTINGS };
 
 /** Charge les réglages de l'application. */
-function loadAppSettings() {
+export function loadAppSettings() {
   try {
     const storedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
     for (const settingKey of Object.keys(DEFAULT_APP_SETTINGS)) {
@@ -63,6 +64,7 @@ export function setHistoryGroup(historyGroup) {
 /** Magasin central : toute modification du document passe par commitChange(). */
 export const appState = {
   uiDocument: null,
+  isReadOnly: false,         // projet ouvert dans un autre onglet : on regarde sans modifier
   selectedId: null,          // ID d'un écran, area, widget, ou style (T…)
   currentScreenId: null,
   editedModuleId: null,      // module en cours d'édition sur le canevas (null = on édite l'écran courant)
@@ -95,13 +97,14 @@ export function notifyChange() {
   for (const listener of changeListeners) listener();
 }
 
-/** Enregistre le document dans le stockage local du navigateur. */
-function saveDocumentLocally() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.uiDocument));
-  } catch (error) {
-    console.error('saveDocumentLocally', error);
-  }
+let documentChangeHandler = () => {};
+
+/**
+ * Choisit la fonction prévenue après chaque modification du document (enregistrement).
+ * @param {() => void} handler fonction
+ */
+export function setDocumentChangeHandler(handler) {
+  documentChangeHandler = handler;
 }
 
 /** Garde l'écran courant, le thème et la sélection valides après un changement de document. */
@@ -120,6 +123,7 @@ function repairViewState() {
  * @returns {boolean} faux si la modification a échoué (document inchangé)
  */
 export function commitChange(mutateDocument) {
+  if (appState.isReadOnly) { alert(READ_ONLY_MESSAGE); notifyChange(); return false; }
   const previousSnapshot = JSON.stringify(appState.uiDocument);
   try {
     const moduleBefore = appState.uiDocument.modules[appState.editedModuleId];
@@ -143,7 +147,7 @@ export function commitChange(mutateDocument) {
   if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
   redoStack.length = 0;
   repairViewState();
-  saveDocumentLocally();
+  documentChangeHandler();
   notifyChange();
   return true;
 }
@@ -155,48 +159,30 @@ export function commitChange(mutateDocument) {
 export function stepHistory(direction) {
   const sourceStack = direction < 0 ? undoStack : redoStack;
   const targetStack = direction < 0 ? redoStack : undoStack;
-  if (sourceStack.length === 0) return;
+  if (sourceStack.length === 0 || appState.isReadOnly) return;
   targetStack.push(JSON.stringify(appState.uiDocument));
   const usedCounters = appState.uiDocument.project.idCounters ?? {};
   appState.uiDocument = JSON.parse(sourceStack.pop());
   const restoredCounters = appState.uiDocument.project.idCounters ??= {};
   for (const [prefix, count] of Object.entries(usedCounters)) restoredCounters[prefix] = Math.max(restoredCounters[prefix] ?? 0, count);
   repairViewState();
-  saveDocumentLocally();
+  documentChangeHandler();
   notifyChange();
 }
 
 /**
- * Remplace tout le document (nouveau projet, import) ; reste annulable.
- * @param {object} newDocument document de remplacement
+ * Affiche un autre document ; l'historique repart de zéro.
+ * @param {object} uiDocument document normalisé
+ * @param {boolean} isReadOnly vrai si on ne peut pas le modifier
  */
-export function replaceDocument(newDocument) {
-  commitChange((uiDocument) => {
-    for (const key of Object.keys(uiDocument)) delete uiDocument[key];
-    Object.assign(uiDocument, newDocument);
-  });
-  appState.selectedId = null;
-  appState.editedModuleId = null;
-  appState.editedStateId = null;
-  appState.parentModuleIds = [];
-  appState.currentScreenId = newDocument.screens[0]?.id ?? null;
-  appState.currentThemeId = newDocument.project.defaultTheme;
+export function openDocument(uiDocument, isReadOnly) {
+  undoStack.length = 0;
+  redoStack.length = 0;
+  activeHistoryGroup = null;
+  lastHistoryGroup = null;
+  Object.assign(appState, { uiDocument, isReadOnly, selectedId: null, editedModuleId: null, editedStateId: null, parentModuleIds: [],
+    armedLibraryItem: null, copiedAppearance: null, currentScreenId: uiDocument.screens[0].id, currentThemeId: uiDocument.project.defaultTheme });
   notifyChange();
-}
-
-/** Charge le document enregistré, ou crée le projet de départ. */
-export function loadInitialDocument() {
-  loadAppSettings();
-  let storedDocument = null;
-  try {
-    const storedText = localStorage.getItem(STORAGE_KEY);
-    if (storedText) storedDocument = normalizeImportedDocument(JSON.parse(storedText));
-  } catch (error) {
-    console.error('loadInitialDocument', error);
-  }
-  appState.uiDocument = storedDocument ?? createEmptyDocument();
-  appState.currentScreenId = appState.uiDocument.screens[0].id;
-  appState.currentThemeId = appState.uiDocument.project.defaultTheme;
 }
 
 /**

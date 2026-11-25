@@ -1,17 +1,52 @@
 // Fenêtre du haut : projet, écrans, thème affiché, annuler / rétablir, zoom, import / export (PROTOTYPE).
-import { createElement, pickTextFile, saveTextFile } from '../utils/dom.js';
-import { appState, commitChange, notifyChange, replaceDocument, selectNode, showScreen, stepHistory } from '../model/store.js';
+import { createElement, saveTextFile } from '../utils/dom.js';
+import { appState, commitChange, notifyChange, selectNode, showScreen, stepHistory } from '../model/store.js';
 import { SCREEN_PRESETS } from '../model/catalog.js';
-import { createEmptyDocument, createScreen } from '../model/document.js';
-import { buildUiSpecExport, parseUiSpecImport } from '../io/uispecExport.js';
+import { createScreen } from '../model/document.js';
+import { getSaveStatus, isBackupDue, retryWritableProject, saveOpenedProject, subscribeToSaveStatus } from '../model/projects.js';
+import { buildUiSpecExport } from '../io/uispecExport.js';
 import { getIconSvg } from '../render/iconLibrary.js';
 import { createSelectElement } from './fields.js';
 import { fitScreenInView, zoomFromButton } from './canvasView.js';
+import { importFile, openProjectsWindow } from './projectsWindow.js';
 import { openTestMode } from './testMode.js';
 
 const ZOOM_STEP = 1.25;
 
+const SAVE_STATUS_TEXTS = {
+  saved: { label: 'Enregistré', title: 'Tout est enregistré dans cet appareil' },
+  pending: { label: 'Enregistre…', title: 'Enregistrement en cours' },
+  failed: { label: 'Échec', title: 'Enregistrement impossible : touche pour réessayer, et exporte ton projet par sécurité' },
+  readonly: { label: 'Lecture seule', title: 'Projet ouvert dans un autre onglet : ferme-le, puis touche ici' },
+};
+
 let topBarElement = null;
+let projectsButton = null;
+const saveStatusButton = createElement('button', { className: 'save-status', attributes: { type: 'button' }, on: { click: handleSaveStatusClick } });
+
+/** Témoin touché : réessaie d'enregistrer, ou de passer en écriture. */
+async function handleSaveStatusClick() {
+  try {
+    if (getSaveStatus() === 'readonly') {
+      if (!(await retryWritableProject())) alert('Toujours ouvert dans un autre onglet. Ferme-le, ou duplique le projet (Projets → Dupliquer).');
+    } else await saveOpenedProject();
+  } catch (error) {
+    console.error('handleSaveStatusClick', error);
+    alert(error.message);
+  }
+}
+
+/** Met à jour le témoin d'enregistrement et le rappel de sauvegarde, sans redessiner la barre. */
+function updateSaveStatus() {
+  const status = getSaveStatus();
+  saveStatusButton.className = `save-status is-${status}`;
+  saveStatusButton.title = SAVE_STATUS_TEXTS[status].title;
+  saveStatusButton.setAttribute('aria-label', SAVE_STATUS_TEXTS[status].label);
+  saveStatusButton.replaceChildren(createElement('span', { className: 'save-status-dot' }), createElement('span', { className: 'save-status-label', text: SAVE_STATUS_TEXTS[status].label }));
+  if (!projectsButton) return;
+  projectsButton.classList.toggle('is-backup-due', isBackupDue());
+  projectsButton.title = isBackupDue() ? 'Projets — pense à sauvegarder ce projet dans un fichier (plus de 7 jours)' : 'Projets : ouvrir, créer, sauvegarder, versions';
+}
 
 /**
  * Bouton d'icône de la barre du haut.
@@ -36,23 +71,6 @@ async function exportUiSpec() {
     console.error('exportUiSpec', error);
     alert(`Export impossible : ${error.message}`);
   }
-}
-
-/** Importe un ui.json (remplace le projet, annulable). */
-async function importUiSpec() {
-  const importedText = await pickTextFile();
-  if (importedText === null) return;
-  try {
-    replaceDocument(parseUiSpecImport(importedText));
-  } catch (error) {
-    console.error('importUiSpec', error);
-    alert(`Import impossible : ${error.message}`);
-  }
-}
-
-/** Remplace le projet par un nouveau projet de départ (annulable). */
-function startNewProject() {
-  if (confirm('Nouveau projet ? (le projet actuel reste récupérable avec Annuler)')) replaceDocument(createEmptyDocument());
 }
 
 /**
@@ -85,10 +103,15 @@ export function renderTopBar() {
   const themeSelect = createSelectElement(appState.currentThemeId, Object.entries(uiDocument.themes).map(([themeId, theme]) => ({ value: themeId, label: `Thème : ${theme.name}` })),
     (themeId) => { appState.currentThemeId = themeId; notifyChange(); });
   themeSelect.title = 'Thème affiché (ne change pas le thème par défaut)';
+  projectsButton = createToolbarButton('folder-open', 'Projets', openProjectsWindow, 'Projets');
+  projectsButton.classList.add('projects-button');
+  updateSaveStatus();
   topBarElement.replaceChildren(
     createToolbarButton('panel-left', 'Afficher / replier la fenêtre de gauche', () => document.body.classList.toggle('is-left-collapsed')),
     createElement('span', { className: 'app-title', text: 'UImaker_noob' }),
+    projectsButton,
     projectNameInput,
+    saveStatusButton,
     createElement('span', { className: 'top-separator' }),
     screenSelect, addScreenSelect, themeSelect,
     createElement('span', { className: 'top-separator' }),
@@ -102,8 +125,7 @@ export function renderTopBar() {
     createElement('span', { className: 'top-spacer' }),
     createToolbarButton('play', 'Tester l\'UI (plein écran, manipulable, sans modifier le projet)', openTestMode, 'Tester'),
     createToolbarButton('circle-question-mark', 'Aide : paramètres des widgets et des areas (nouvel onglet)', () => window.open('./help.html', '_blank')),
-    createToolbarButton('file-plus', 'Nouveau projet', startNewProject),
-    createToolbarButton('file-down', 'Importer un ui.json', importUiSpec, 'Importer'),
+    createToolbarButton('file-down', 'Importer un fichier (ui.json ou projets .uimnoob)', importFile, 'Importer'),
     createToolbarButton('file-up', 'Exporter ui.json (spec UI pour une autre session)', exportUiSpec, 'Exporter'),
     createToolbarButton('panel-right', 'Afficher / replier la fenêtre de droite', () => document.body.classList.toggle('is-right-collapsed')),
   );
@@ -115,5 +137,6 @@ export function renderTopBar() {
  */
 export function createTopBar() {
   topBarElement = createElement('header', { className: 'top-bar' });
+  subscribeToSaveStatus(updateSaveStatus);
   return topBarElement;
 }
