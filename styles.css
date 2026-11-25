@@ -413,6 +413,7 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 /* ---- Export ---- */
 .projects-window.is-small { width: min(560px, calc(100vw - 40px)); height: auto; max-height: calc(100vh - 40px); }
 .projects-body progress { width: 100%; }
+.request-description textarea { min-height: 200px; }
 .export-problems > summary { cursor: pointer; padding: 6px 0; color: var(--editor-selection); }
 .export-problems ul { margin: 0; padding-left: 18px; max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; font-size: 12px; }
 

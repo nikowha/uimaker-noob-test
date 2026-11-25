@@ -4,6 +4,7 @@ import { appState, commitChange } from '../model/store.js';
 import { countCustomWidgetUsers, createCustomWidgetFileText, installCustomWidget, isCustomWidgetUpdateAvailable, parseCustomWidgetFile } from '../model/customWidgets.js';
 import { deleteCustomWidgetEntry, getCustomWidgetEntry, listCustomWidgetEntries, putCustomWidgetEntry } from '../io/customWidgetLibrary.js';
 import { createCustomWidgetPreview } from '../render/customWidgetPreview.js';
+import { openWidgetRequestWindow } from './widgetRequestWindow.js';
 import { createButtonRow, createPanelSection } from './fields.js';
 
 const EXAMPLE_URL = './data/knob.uimwidget';
@@ -102,6 +103,7 @@ export function createCustomWidgetsView(createTile) {
   const libraryCards = listCustomWidgetEntries().map((entry) => createCard(entry,
     createTile({ kind: 'libraryCustomWidget', value: entry.libraryId, label: entry.name }, createPreview(entry), `v${entry.version}`), [
       { label: 'Exporter', title: 'Fichier .uimwidget', onClick: () => exportCustomWidget(entry) },
+      { label: 'Faire modifier…', title: 'Crée une demande pour une session Claude', onClick: () => openWidgetRequestWindow({ definition: entry }) },
       { label: 'Supprimer', isDanger: true, onClick: () => {
         if (confirm(`Supprimer « ${entry.name} » de la bibliothèque ? Les projets qui l'utilisent le gardent.`)) deleteCustomWidgetEntry(entry.libraryId).catch((error) => reportError('Suppression impossible', error));
       } },
@@ -111,6 +113,7 @@ export function createCustomWidgetsView(createTile) {
     const entry = getCustomWidgetEntry(definition.libraryId);
     return createCard(definition, createTile({ kind: 'customWidget', value: customWidgetId, label: definition.name }, createPreview(definition), `${customWidgetId} · v${definition.version} · ${userCount} utilisation(s)`), [
       { label: 'Exporter', title: 'Fichier .uimwidget', onClick: () => exportCustomWidget(definition) },
+      { label: 'Faire modifier…', title: 'Crée une demande pour une session Claude', onClick: () => openWidgetRequestWindow({ definition }) },
       ...(entry ? [] : [{ label: '→ Bibliothèque', onClick: () => putCustomWidgetEntry(definition, () => true).catch((error) => reportError('Ajout impossible', error)) }]),
       ...(isCustomWidgetUpdateAvailable(definition, entry) ? [{ label: `Mettre à jour → v${entry.version}`, onClick: () => updateCustomWidget(customWidgetId) }] : []),
       { label: 'Supprimer', isDanger: true, onClick: () => {
@@ -121,9 +124,9 @@ export function createCustomWidgetsView(createTile) {
   });
   const createGrid = (cards, emptyText) => (cards.length ? createElement('div', { className: 'module-grid' }, cards) : createElement('div', { className: 'panel-hint', text: emptyText }));
   return [
-    createElement('div', { className: 'panel-hint', text: 'Un custom widget est un widget codé par une session Claude. Donne-lui le guide et ta description, puis importe le fichier .uimwidget qu\'elle te rend. Ici il n\'est qu\'un aperçu : son code tourne seulement dans « ▶ Tester », isolé et sans réseau.' }),
+    createElement('div', { className: 'panel-hint', text: 'Un custom widget est un widget codé par une session Claude. « Nouveau… » prépare la demande à lui donner. Importe ensuite le fichier .uimwidget qu\'elle te rend. Ici il n\'est qu\'un aperçu : son code tourne seulement dans « ▶ Tester », isolé et sans réseau.' }),
     createPanelSection('Bibliothèque (tous les projets)', [createGrid(libraryCards, 'Aucun custom widget.'),
-      createButtonRow([{ label: 'Importer…', title: 'Fichier .uimwidget', onClick: importCustomWidget }, { label: 'Exemple (potard)', onClick: addExample }, { label: 'Guide pour la session', title: 'CUSTOM_WIDGET_GUIDE.md', onClick: saveGuide }])]),
+      createButtonRow([{ label: 'Nouveau…', title: 'Écris une demande pour une session Claude', onClick: () => openWidgetRequestWindow() }, { label: 'Importer…', title: 'Fichier .uimwidget', onClick: importCustomWidget }, { label: 'Exemple (potard)', onClick: addExample }, { label: 'Guide pour la session', title: 'CUSTOM_WIDGET_GUIDE.md', onClick: saveGuide }])]),
     createPanelSection('Custom widgets de ce projet', [createGrid(projectCards, 'Aucun.')]),
   ];
 }

@@ -46,7 +46,7 @@ JSON en UTF-8 :
 | `params[].key`, `events[].name` | Lettres et chiffres, commence par une lettre (`accentColor`). Unique. Ne pas renommer d'une version à l'autre |
 | `params[].type` | `number` (`min`, `max`, `step`), `text`, `boolean`, `choice` (`choices` : liste de textes), `color` |
 | `params[].label` | Nom affiché à l'utilisateur, en français |
-| `basedOn` | Type du widget de base modifié (`button`…), ou vide |
+| `basedOn` | Type du widget de base modifié (`button`…), ou vide. L'app propose alors de **remplacer** ce type de widget : mêmes `key` = valeurs reprises ; une liste devient un `text` séparé par ` \| ` |
 | `size` | Taille de départ en px. L'utilisateur peut la changer : le widget doit **suivre la taille** (100 %) |
 | `previewSvg` | Image fixe dans l'éditeur (le code n'y tourne pas). SVG simple : formes, textes, dégradés. Sont retirés : `style`, `class`, scripts, liens, images, filtres, `use`. `currentColor` = couleur du texte. Ne pas mettre `width`/`height`, seulement `viewBox` |
 | `nativeNotes` | Comment recoder ce widget en natif : gestes, dessin, valeurs, accessibilité |

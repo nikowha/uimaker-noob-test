@@ -3,7 +3,9 @@ import { createElement } from '../utils/dom.js';
 import { limitNumber } from '../utils/numbers.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
 import { getCustomWidgetFields, isCustomWidgetUpdateAvailable } from '../model/customWidgets.js';
-import { getCustomWidgetEntry } from '../io/customWidgetLibrary.js';
+import { canBecomeCustomWidget, listReplacements, replaceWithCustomWidget } from '../model/widgetRequest.js';
+import { openWidgetRequestWindow } from './widgetRequestWindow.js';
+import { getCustomWidgetEntry, listCustomWidgetEntries } from '../io/customWidgetLibrary.js';
 import { updateCustomWidget } from './customWidgetsView.js';
 import { ANCHORS, APPEARANCE_FIELDS, getFieldLimits, limitWidgetNumbers, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
@@ -319,7 +321,23 @@ function createCustomWidgetInfo(widget) {
   return [
     createElement('div', { className: 'panel-hint', text: `v${definition.version}${definition.description ? ` — ${definition.description}` : ''}` }),
     ...(isCustomWidgetUpdateAvailable(definition, entry) ? [createButtonRow([{ label: `Mettre à jour → v${entry.version}`, onClick: () => updateCustomWidget(widget.customWidgetId) }])] : []),
+    createButtonRow([{ label: 'Faire modifier le code…', title: 'Crée une demande pour une session Claude', onClick: () => openWidgetRequestWindow({ widget, definition }) }]),
   ];
+}
+
+/**
+ * Section d'un widget de base : demander une version codée, ou le remplacer par un custom widget fait à partir de ce type.
+ * @param {object} widget widget
+ * @returns {HTMLElement} section
+ */
+function createCustomCodeSection(widget) {
+  const replacements = listReplacements(appState.uiDocument, listCustomWidgetEntries(), widget.type);
+  return createPanelSection('Version codée (custom widget)', [
+    createElement('div', { className: 'panel-hint', text: 'Pour changer le dessin ou le comportement de ce widget, une session Claude peut en coder une version.' }),
+    createButtonRow([{ label: 'Exporter pour modification…', onClick: () => openWidgetRequestWindow({ widget }) }]),
+    ...replacements.map((definition) => createButtonRow([{ label: `Remplacer par « ${definition.name} »`, title: 'Garde l\'ID, la place, l\'apparence et les événements',
+      onClick: () => commitChange((uiDocument) => replaceWithCustomWidget(uiDocument, widget.id, definition)) }])),
+  ], replacements.length > 0);
 }
 
 /**
@@ -493,6 +511,7 @@ function createWidgetProperties(widget, record) {
   else sections.push(putInTab('look', createNodeAppearanceSection(widget, widget.type)));
   if (widget.type === 'repeat' && widget.content?.itemModuleId) sections.push(...createRepeatSections(widget));
   sections.push(putInTab('properties', createPanelSection('Notes', [createNotesField(widget)])));
+  if (canBecomeCustomWidget(widget)) sections.push(putInTab('properties', createCustomCodeSection(widget)));
   return sections;
 }
 
