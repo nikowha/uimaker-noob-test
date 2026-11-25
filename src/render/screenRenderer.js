@@ -1,5 +1,6 @@
 // Rendu d'un écran : areas découpées, placement des widgets, apparence, thème (PROTOTYPE).
 import { createElement } from '../utils/dom.js';
+import { createCustomWidgetPreview } from './customWidgetPreview.js';
 import { buildRepeatContainer, resolveInstanceRoot } from '../model/modules.js';
 import { applyAppearanceToElement, applyThemeVariables, resolveAppearance, resolveColor } from './styleResolver.js';
 import { interpolateWidget } from '../model/variables.js';
@@ -214,6 +215,7 @@ export function renderScreen(uiDocument, screen, renderOptions) {
         widgetElement.append(childElement);
       });
     } else {
+      if (renderedWidget.type === 'customWidget') widgetElement.append(createCustomWidgetPreview(uiDocument.customWidgets?.[renderedWidget.customWidgetId]));
       fillWidgetContent(widgetElement, interpolateWidget(uiDocument, renderedWidget));
       if (renderedWidget.type === 'checkbox') applyCheckedColor(widgetElement, renderedWidget);
     }

@@ -9,12 +9,13 @@ import { convertVariableValue, countVariableUsers, createVariable, setVariableKi
 import { createButtonRow, createCheckboxField, createNumberField, createPanelSection, createSelectElement, createSelectField, createTextField } from './fields.js';
 import { startLibraryDrag } from './canvasView.js';
 import { applyIconFromLibrary, findDefaultHolderId } from './editorActions.js';
+import { createCustomWidgetsView } from './customWidgetsView.js';
 import { createModulesView } from './modulesView.js';
 import { createActionEditor } from './actionEditor.js';
 import { convertMenuItemsToText, flattenMenuItems, parseMenuText } from '../model/interactions.js';
 
 const RIGHT_SECTIONS = [
-  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'modules', label: 'Modules' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
+  { value: 'widgets', label: 'Bibliothèque de widgets' }, { value: 'modules', label: 'Modules' }, { value: 'customWidgets', label: 'Custom widgets' }, { value: 'templates', label: 'Modèles' }, { value: 'menus', label: 'Menus (barre et clic droit)' }, { value: 'icons', label: 'Icônes' },
   { value: 'styles', label: 'Styles partagés' }, { value: 'variables', label: 'Variables de test' }, { value: 'themes', label: 'Thèmes et couleurs' },
 ];
 const MAXIMUM_ICON_RESULTS = 240;
@@ -282,7 +283,7 @@ export function renderRightPanel() {
   const isSearchFocused = activeElement?.type === 'search' && panelBodyElement.contains(activeElement);
   if (isSearchFocused) return;
   const scrollPosition = panelBodyElement.scrollTop;
-  const sectionBuilders = { widgets: createWidgetLibrary, modules: () => createModulesView(createLibraryTile), templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, variables: createVariablesView, themes: createThemesView };
+  const sectionBuilders = { widgets: createWidgetLibrary, modules: () => createModulesView(createLibraryTile), customWidgets: () => createCustomWidgetsView(createLibraryTile), templates: createTemplatesView, menus: createMenusView, icons: createIconLibraryView, styles: createStylesView, variables: createVariablesView, themes: createThemesView };
   panelBodyElement.replaceChildren(...(sectionBuilders[appState.rightPanelSection] ?? createWidgetLibrary)());
   panelBodyElement.scrollTop = scrollPosition;
 }

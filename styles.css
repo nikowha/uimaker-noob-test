@@ -260,6 +260,7 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .test-toolbar button, .test-toolbar select { min-height: var(--touch-target); }
 .test-title { font-weight: 700; color: #5bd38a; white-space: nowrap; }
 .test-size-label { color: var(--editor-text-muted); white-space: nowrap; }
+.test-stage { position: relative; flex: 1; min-height: 0; display: flex; }
 .test-viewport { position: relative; flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; }
 .test-frame { position: relative; flex: none; transform-origin: center center; }
 .test-frame .ui-screen { width: 100% !important; height: 100% !important; }
@@ -414,3 +415,11 @@ code { font: 11px ui-monospace, "Cascadia Mono", Consolas, monospace; color: #9e
 .projects-body progress { width: 100%; }
 .export-problems > summary { cursor: pointer; padding: 6px 0; color: var(--editor-selection); }
 .export-problems ul { margin: 0; padding-left: 18px; max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; font-size: 12px; }
+
+/* ---- Custom widgets ---- */
+.uiw-custom-preview { width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+.uiw-custom-preview svg { display: block; }
+.uiw-custom-preview.is-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px dashed #8a8f98; border-radius: 6px; text-align: center; font-size: 12px; color: #8a8f98; }
+.custom-widget-thumbnail { width: 72px; height: 56px; color: var(--editor-text); }
+.custom-widget-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.custom-widget-layer iframe { position: absolute; border: 0; transform-origin: 0 0; background: transparent; color-scheme: normal; }

@@ -7,6 +7,8 @@ import { attachNumberLimits } from '../utils/numbers.js';
 import { appSettings, appState, updateAppSetting } from '../model/store.js';
 import { buildNodeIndex, cloneJson } from '../model/document.js';
 import { expandAllModuleInstances } from '../model/modules.js';
+import { WIDGET_TRIGGER_PREFIX } from '../model/customWidgets.js';
+import { createCustomWidgetHost } from './customWidgetHost.js';
 import { computeVariableChange, convertVariableValue } from '../model/variables.js';
 import { getTriggerFallbacks } from '../model/interactions.js';
 import { renderScreen } from '../render/screenRenderer.js';
@@ -107,6 +109,7 @@ function renderTestScreens(renderOptions = {}) {
     surfaces.push(createElement('div', { className: 'test-dialog-backdrop' }, [createScreenSurface(dialogScreen, computeFitScale(dialogScreen, DIALOG_MARGIN_PIXELS), false)]));
   }
   testSession.viewportElement.replaceChildren(...surfaces);
+  testSession.customWidgetHost.sync({ testDocument: testSession.testDocument, themeId: testSession.themeId });
   testSession.sizeLabel.textContent = `${mainScreen.name} — ${Math.round(mainScreen.size.width)}×${Math.round(mainScreen.size.height)}`
     + `${testSession.scale < 1 ? ` (affiché à ${Math.round(testSession.scale * 100)} %)` : ''}`
     + `${testSession.dialogStack.length ? ` · dialogue : ${testSession.dialogStack.join(' › ')}` : ''}`;
@@ -204,7 +207,7 @@ function runAction(action, actionContext) {
     case 'changeVariable': {
       const variable = testSession.testDocument.variables?.[action.variableId];
       if (!variable) { showToast('Variable introuvable'); return; }
-      setTestVariable(action.variableId, computeVariableChange(variable, action));
+      setTestVariable(action.variableId, computeVariableChange(variable, action, actionContext.sourceContent));
       return;
     }
     case 'custom':
@@ -234,6 +237,18 @@ function handleGesture(gesture, eventTarget, clientX, clientY) {
   const touchedWidget = nodes.find((node) => node.type);
   if (touchedWidget?.type === 'button' && CLICK_LIKE_GESTURES.has(gesture)) showToast(`${touchedWidget.name} (aucune action)`);
   else if (!CLICK_LIKE_GESTURES.has(gesture)) showToast(`${GESTURE_LABELS[gesture] ?? gesture} sur ${touchedWidget?.name ?? nodes[0].name} (aucune action)`);
+}
+
+/**
+ * Lance l'action reliée à un événement d'un custom widget.
+ * @param {object} widget widget de la copie testée
+ * @param {string} eventName change, ou un événement déclaré par le widget
+ */
+function runCustomWidgetEvent(widget, eventName) {
+  const nodeEvent = (widget.events ?? []).find((candidate) => candidate.trigger === WIDGET_TRIGGER_PREFIX + eventName);
+  const viewportRectangle = testSession.viewportElement.getBoundingClientRect();
+  if (nodeEvent?.action) runAction(nodeEvent.action, { clientX: viewportRectangle.left + viewportRectangle.width / 2, clientY: viewportRectangle.top + viewportRectangle.height / 2, sourceName: widget.name, sourceContent: widget.content });
+  else if (eventName !== 'change') showToast(`${widget.name} : ${eventName} (aucune action)`);
 }
 
 /**
@@ -694,7 +709,8 @@ function collectTestValues(testDocument) {
   const valuesByPosition = new Map();
   const visitNode = (node, position) => {
     const { selectedIndex, activeIndex, selectedRow, value } = node.content ?? {};
-    valuesByPosition.set(position, { node, values: JSON.stringify({ state: node.state, sizing: node.sizing, size: position.includes('/') ? undefined : node.size, content: { selectedIndex, activeIndex, selectedRow, value } }) });
+    const customContent = node.type === 'customWidget' ? node.content : {};
+    valuesByPosition.set(position, { node, values: JSON.stringify({ state: node.state, sizing: node.sizing, size: position.includes('/') ? undefined : node.size, content: { selectedIndex, activeIndex, selectedRow, value, ...customContent } }) });
     [...(node.children ?? []), ...(node.widgets ?? []), ...(node.root ? [node.root] : [])].forEach((childNode, childIndex) => visitNode(childNode, `${position}/${childIndex}:${childNode.name}`));
   };
   for (const screen of testDocument.screens) visitNode(screen, screen.id);
@@ -812,10 +828,17 @@ export function openTestMode() {
   const toolbarElement = createElement('div', { className: 'test-toolbar' });
   const toastElement = createElement('div', { className: 'test-toast' });
   const menuLayerElement = createElement('div', { className: 'test-menu-layer' });
-  const overlayElement = createElement('div', { className: 'test-mode' }, [toolbarElement, viewportElement, toastElement, menuLayerElement]);
+  const customWidgetHost = createCustomWidgetHost(viewportElement, {
+    onEvent: runCustomWidgetEvent,
+    onTap: (element, gesture, clientX, clientY) => handleGesture(gesture, element, clientX, clientY),
+    onPress: () => { if (isAnyMenuOpen()) closeAllMenus(); },
+    onEscape: () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
+    onError: (widgetName, message) => showToast(`Custom widget « ${widgetName} » : erreur dans son code (${message})`),
+  });
+  const overlayElement = createElement('div', { className: 'test-mode' }, [toolbarElement, createElement('div', { className: 'test-stage' }, [viewportElement, customWidgetHost.element]), toastElement, menuLayerElement]);
   testSession = {
     testDocument: createTestDocument(), variableValues: {}, startValues: new Map(), screenId: appState.currentScreenId, themeId: appState.currentThemeId,
-    scale: 1, dialogStack: [], overlayElement, viewportElement, toolbarElement, toastElement,
+    scale: 1, dialogStack: [], overlayElement, viewportElement, customWidgetHost, toolbarElement, toastElement,
     sizeLabel: createElement('span', { className: 'test-size-label' }), toastTimer: null,
     pressSession: null, lastTap: null, hoveredWidgetId: null, lastWheelTime: 0,
     resizeObserver: new ResizeObserver(() => renderTestScreens()),
@@ -842,6 +865,7 @@ export function openTestMode() {
 export function closeTestMode() {
   if (!testSession) return;
   testSession.resizeObserver.disconnect();
+  testSession.customWidgetHost.destroy();
   clearTimeout(testSession.pressSession?.longPressTimer);
   window.removeEventListener('pointerup', handleTestPointerUp);
   window.removeEventListener('pointercancel', handleTestPointerUp);

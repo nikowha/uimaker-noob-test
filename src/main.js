@@ -7,6 +7,7 @@ import { createTopBar, renderTopBar } from './ui/topBar.js';
 import { createLeftPanel, renderLeftPanel } from './ui/leftPanel.js';
 import { createRightPanel, renderRightPanel } from './ui/rightPanel.js';
 import { createCanvasView, renderCanvasView } from './ui/canvasView.js';
+import { loadCustomWidgetLibrary } from './io/customWidgetLibrary.js';
 import { loadModuleLibrary } from './io/moduleLibrary.js';
 import { deleteSelection, duplicateSelection } from './ui/editorActions.js';
 
@@ -52,6 +53,7 @@ async function startApplication() {
   window.addEventListener('keydown', handleKeyDown);
   renderAll();
   loadModuleLibrary().catch((error) => console.error('loadModuleLibrary', error));
+  loadCustomWidgetLibrary().catch((error) => console.error('loadCustomWidgetLibrary', error));
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' }).catch((error) => console.error('startApplication (service worker)', error));
   }

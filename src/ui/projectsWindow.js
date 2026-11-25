@@ -205,8 +205,8 @@ async function importProjects(fileValue) {
     (importedProject, existingRecord) => askChoice(
       `« ${importedProject.name} » existe déjà ici${existingRecord.deletedAt ? ' (à la corbeille)' : ''}.\nFichier : modifié le ${formatDate(importedProject.updatedAt)}.\nCet appareil : modifié le ${formatDate(existingRecord.updatedAt)}.`,
       [{ value: 'both', label: 'Garder les deux' }, { value: 'replace', label: 'Remplacer', isDanger: true }, { value: 'skip', label: 'Ignorer' }]),
-    (entry) => confirm(`Module « ${entry.name} » v${entry.version} modifié des deux côtés. Remplacer celui de cet appareil par celui du fichier ?`));
-  alert(`${report.addedRecords.length} projet(s) ajouté(s), ${report.replacedCount} remplacé(s), ${report.skippedCount} ignoré(s) ou identique(s), ${report.moduleCount} module(s) ajouté(s) ou mis à jour.`);
+    (entry) => confirm(`« ${entry.name} » v${entry.version} (bibliothèque) modifié des deux côtés. Remplacer celui de cet appareil par celui du fichier ?`));
+  alert(`${report.addedRecords.length} projet(s) ajouté(s), ${report.replacedCount} remplacé(s), ${report.skippedCount} ignoré(s) ou identique(s), ${report.moduleCount} module(s) et ${report.customWidgetCount} custom widget(s) ajouté(s) ou mis à jour.`);
   if (report.addedRecords.length === 1 && report.replacedCount === 0 && windowElement === null) {
     await openProject(report.addedRecords[0].id);
     fitScreenInView();

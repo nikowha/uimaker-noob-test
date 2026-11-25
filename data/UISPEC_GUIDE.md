@@ -1,6 +1,6 @@
 # Guide du format « spec UI » de UImaker_noob
 
-> **Brouillon v0.3 — 2026-11-24.** Le format peut encore changer avant la V1 de UImaker_noob.
+> **Brouillon v0.4 — 2026-11-25.** Le format peut encore changer avant la V1 de UImaker_noob.
 > Ce fichier s'adresse à **une autre session Claude** (ou à un humain) qui doit :
 > - **A.** lire un export de UImaker_noob pour **coder l'application** correspondante ;
 > - **B.** **générer** un `ui.json` que l'utilisateur ouvrira dans UImaker_noob pour l'ajuster.
@@ -21,6 +21,7 @@ screens/S1.png       ← aperçu de chaque écran, dans le thème par défaut
 screens/S1_H2.png    ← aperçu dans les autres thèmes (S1 = écran, H2 = thème)
 modules/G1.png       ← aperçu de chaque module (thème par défaut)
 modules/G1_E1.png    ← aperçu de chaque état de module
+custom-widgets/X1.uimwidget ← chaque custom widget (code web de référence)
 assets/icons/*.svg   ← icônes utilisées (SVG)
 assets/images/*      ← images (après la V1)
 ```
@@ -55,6 +56,7 @@ pas une spec : demander l'export `ui.json`.
 | `E` | état d'un module |
 | `D` | variable de test |
 | `G` | module (agencement réutilisable ; `C` dans les anciens fichiers) |
+| `X` | custom widget (widget codé) |
 | `T` | style partagé |
 | `V` | variable de couleur |
 | `H` | thème |
@@ -70,7 +72,7 @@ pas une spec : demander l'export `ui.json`.
 ```jsonc
 {
   "format": "uimaker-noob-uispec",      // toujours cette valeur
-  "formatVersion": "0.3",
+  "formatVersion": "0.4",
   "generator": "UImaker_noob 0.1",       // ou le nom de la session / de l'outil qui a généré le fichier
   "project": {
     "name": "MyApp",
@@ -88,6 +90,7 @@ pas une spec : demander l'export `ui.json`.
   "icons":          { "lucide:house": { … } },  // § 8
   "modules":        { "G1": { … } },       // § 9
   "variables":     { "D1": { … } },
+  "customWidgets":  { "X1": { … } },       // § 9 bis
   "menus":          { "M1": { … } },       // § 10
   "screens":        [ { … } ]              // § 6
 }
@@ -292,6 +295,7 @@ Si `sizing` ou `resizableSplitter` manquent, on prend `project.defaults`.
 | `pageStack` | **pile de pages** : conteneur dont **une seule** page (enfant, en général un `container`) est visible : `activeIndex`. Pilotée par une `list` ou des `tabs` dont `controlsPageStack` vaut son ID : choisir l'élément n° i affiche la page n° i. Équivalents : WinUI `NavigationView` + `Frame`, SwiftUI `NavigationSplitView` / `TabView`, Qt `QStackedWidget`, web : contenu affiché selon l'onglet |
 | `repeat` | **répétition** d'un module, nombre décidé par l'app (§ 9) : `itemModuleId`, `previewCount`, `countVariableId`, `countSource`, `minCount`, `maxCount` (0 = sans limite), `direction`, `distribution`, `itemSize`, `itemMinSize`, `crossSize`, `gap`, `positionSource`, `alternateColor`, `alternateEvery`, `itemOverrides` |
 | `placeholder` | `description` : réserve la place d'une vue **codée plus tard**, sans équivalent dans le catalogue (vue 3D, graphique, lecteur vidéo, timeline, éditeur de nœuds…). Champ en plus : `displayColor` |
+| `customWidget` | widget codé (§ 9 bis) : `customWidgetId`, `content` = un champ par réglage (`params`) |
 | `moduleInstance` | utilisation d'un module de widgets : `moduleId`, `overrides` (§ 9) |
 
 ---
@@ -320,7 +324,7 @@ Si `sizing` ou `resizableSplitter` manquent, on prend `project.defaults`.
 ## 9. Modules
 
 Un **module** est un **agencement réutilisable** de widgets, d'areas et/ou d'autres modules. Il n'a pas de code propre.
-(Un **custom widget**, widget codé ou au code modifié, est autre chose : pas encore dans le format.)
+(Un **custom widget**, widget codé ou au code modifié, est autre chose : § 9 bis.)
 
 ```json
 "modules": {
@@ -359,6 +363,17 @@ Un **module** est un **agencement réutilisable** de widgets, d'areas et/ou d'au
 - `libraryId` identifie le module entre projets (UUID, à garder) ; `version` augmente à chaque modification.
 - Dans le code : un module = un composant / une vue réutilisable ; `overrides` = ses paramètres.
 - Anciens fichiers : `components` / `componentInstance` / `componentId` (`C1`…) sont convertis à l'import, ID gardés.
+
+### 9 bis. Custom widgets
+
+`"customWidgets": { "X1": { "name": "Knob", "description", "libraryId", "version", "params": [ … ], "events": [ … ], "size", "html", "css", "js",
+"previewSvg", "nativeNotes" } }` (format complet : CUSTOM_WIDGET_GUIDE.md). Un widget `{ "type": "customWidget", "customWidgetId": "X1",
+"content": { "value": 50 } }` l'utilise ; ses couleurs peuvent être `"$V3"`.
+- **Dans le code** : un composant natif par custom widget, avec `params` comme propriétés et `events` comme événements. `html` / `css` / `js`
+  sont la **référence de comportement et de dessin**, à ne pas mettre tels quels dans une vue web. Lire `nativeNotes`.
+- `events` d'un widget : déclencheurs `widget:change` (un réglage a changé) et `widget:<événement>`. Dans `changeVariable`,
+  `"amount": "{value}"` = valeur du réglage `value` de ce widget.
+- **Générer un ui.json** : ne pas inventer de custom widget ; utiliser un `placeholder` décrit.
 
 ### Variables de test
 
@@ -466,7 +481,7 @@ app existante, une capture d'écran ou une description).
 
 Règles :
 
-1. Commencer par `"format": "uimaker-noob-uispec"`, `"formatVersion": "0.3"` et remplir `"generator"`.
+1. Commencer par `"format": "uimaker-noob-uispec"`, `"formatVersion": "0.4"` et remplir `"generator"`.
 2. **ID** : uniques dans tout le fichier, avec le bon préfixe, numérotés à partir de 1 (`S1`, `A1`, `W1`…).
    Les ID internes aux `modules` sont aussi uniques dans le fichier.
 3. Chaque area est **soit découpée** (`split` + `children`), **soit une feuille** (`widgetLayout` + `widgets`).
@@ -491,7 +506,7 @@ chaque préfixe.
 ```json
 {
   "format": "uimaker-noob-uispec",
-  "formatVersion": "0.3",
+  "formatVersion": "0.4",
   "generator": "Claude session — example",
   "project": { "name": "TinyApp", "defaultTheme": "H1" },
   "themes": { "H1": { "name": "Dark" } },
@@ -530,6 +545,7 @@ chaque préfixe.
 
 ## Historique du format
 
+- **0.4** (2026-11-25) — `customWidgets` (`X`), `customWidget`, déclencheurs `widget:…`, `amount: "{réglage}"`.
 - **0.3** (2026-11-24) — `repeat`, `states` / `activeStates` (`E`), `variables` (`D`), action `changeVariable`, `checkbox.appearance`.
 - **0.2** (2026-11-23) — `modules` (`G`) remplacent `components` ; modules d'area ; modules imbriqués ; `libraryId`, `version`.
 - **0.1** (2026-11-21) — ajout de `menus` (M), `events` (déclencheurs souris / tactile / Pencil / clavier) et des actions

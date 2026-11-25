@@ -1,9 +1,10 @@
 // Document UImaker_noob : données du projet au format « spec UI » + opérations (PROTOTYPE).
 // Le document en mémoire suit directement le format décrit dans UISPEC_GUIDE.md.
 import { SCREEN_PRESETS, WIDGET_TYPES } from './catalog.js';
+import { checkDocumentCustomWidgets } from './customWidgets.js';
 
 export const UISPEC_FORMAT = 'uimaker-noob-uispec';
-export const UISPEC_FORMAT_VERSION = '0.3';
+export const UISPEC_FORMAT_VERSION = '0.4';
 export const GENERATOR_NAME = 'UImaker_noob prototype 0.1';
 
 const ID_PATTERN = /^([A-Z])(\d+)$/;
@@ -37,7 +38,7 @@ export function recomputeIdCounters(uiDocument) {
       Object.values(value).forEach(visitValue);
     }
   };
-  for (const collectionName of ['themes', 'colorVariables', 'styles', 'modules', 'menus', 'variables']) {
+  for (const collectionName of ['themes', 'colorVariables', 'styles', 'modules', 'menus', 'variables', 'customWidgets']) {
     Object.keys(uiDocument[collectionName] ?? {}).forEach(registerId);
   }
   visitValue(uiDocument.screens);
@@ -124,7 +125,7 @@ export function createEmptyDocument() {
     format: UISPEC_FORMAT, formatVersion: UISPEC_FORMAT_VERSION, generator: GENERATOR_NAME,
     project: { name: 'MyApp', notes: '', defaultTheme: 'H1', idCounters: {},
       defaults: { areaSizing: { mode: 'fill' }, resizableSplitter: false } },
-    themes: {}, colorVariables: {}, styles: {}, icons: {}, modules: {}, menus: {}, variables: {}, screens: [],
+    themes: {}, colorVariables: {}, styles: {}, icons: {}, modules: {}, customWidgets: {}, menus: {}, variables: {}, screens: [],
   };
   const themeId = createId(uiDocument, 'H');
   uiDocument.themes[themeId] = { name: 'Default' };
@@ -306,8 +307,8 @@ export function collectSubtreeNodeIds(node) {
   return [node.id, ...[...(node.children ?? []), ...(node.widgets ?? [])].flatMap(collectSubtreeNodeIds)];
 }
 
-const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId', 'itemModuleId', 'variableId', 'countVariableId']);
-const COLOR_REFERENCE_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor', 'alternateColor']);
+const REFERENCE_KEYS = new Set(['id', 'target', 'controlsPageStack', 'menuId', 'style', 'moduleId', 'itemModuleId', 'variableId', 'countVariableId', 'customWidgetId']);
+const COLOR_REFERENCE_PATTERN = /^\$V\d+$/;
 
 /**
  * Copie une valeur en remplaçant les ID et toutes les références vers ces ID (liens internes compris).
@@ -322,7 +323,7 @@ export function remapIds(value, idMapping) {
   return Object.fromEntries(Object.entries(value).map(([key, childValue]) => {
     if (typeof childValue === 'string') {
       if (REFERENCE_KEYS.has(key)) return [key, getNewId(childValue)];
-      if (COLOR_REFERENCE_KEYS.has(key) && childValue.startsWith('$')) return [key, `$${getNewId(childValue.slice(1))}`];
+      if (COLOR_REFERENCE_PATTERN.test(childValue)) return [key, `$${getNewId(childValue.slice(1))}`];
       return [key, childValue];
     }
     if (key === 'activeStates' && Array.isArray(childValue)) return [key, childValue.map(getNewId)];
@@ -474,6 +475,7 @@ export function normalizeImportedDocument(importedValue) {
   uiDocument.project.defaults ??= { areaSizing: { mode: 'fill' }, resizableSplitter: false };
   for (const collectionName of ['themes', 'colorVariables', 'styles', 'icons', 'menus', 'variables']) uiDocument[collectionName] ??= {};
   migrateComponentsToModules(uiDocument);
+  checkDocumentCustomWidgets(uiDocument);
   if (Object.keys(uiDocument.themes).length === 0) uiDocument.themes.H1 = { name: 'Default' };
   if (!uiDocument.themes[uiDocument.project.defaultTheme]) uiDocument.project.defaultTheme = Object.keys(uiDocument.themes)[0];
   for (const record of buildNodeIndex(uiDocument).values()) {

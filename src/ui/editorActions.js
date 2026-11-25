@@ -8,6 +8,8 @@ import {
   assertNoModuleCycle, buildLibraryEntry, createModuleInstance, detachModuleInstance, installLibraryEntry, isModuleUpdateAvailable, placeAreaModule,
   preparePublication, saveNodeAsModule, setInstanceNodeValues,
 } from '../model/modules.js';
+import { createCustomWidgetNode, installCustomWidget } from '../model/customWidgets.js';
+import { getCustomWidgetEntry } from '../io/customWidgetLibrary.js';
 import { getLibraryEntry, putLibraryEntry } from '../io/moduleLibrary.js';
 
 const ICON_TARGET_TYPES = new Set(['button', 'icon']);
@@ -62,6 +64,8 @@ export function findDefaultHolderId() {
 function createWidgetFromLibraryItem(uiDocument, libraryItem) {
   if (libraryItem.kind === 'module') return createModuleInstance(uiDocument, libraryItem.value);
   if (libraryItem.kind === 'libraryModule') return createModuleInstance(uiDocument, installLibraryEntry(uiDocument, getLibraryEntry(libraryItem.value)));
+  if (libraryItem.kind === 'customWidget') return createCustomWidgetNode(uiDocument, libraryItem.value);
+  if (libraryItem.kind === 'libraryCustomWidget') return createCustomWidgetNode(uiDocument, installCustomWidget(uiDocument, getCustomWidgetEntry(libraryItem.value)));
   if (libraryItem.kind === 'icon') {
     const iconWidget = createWidget(uiDocument, 'icon');
     iconWidget.content.icon = `lucide:${libraryItem.value}`;

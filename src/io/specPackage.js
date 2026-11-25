@@ -1,4 +1,5 @@
 // Paquet d'export : zip avec ui.json, schéma, guide, images PNG et icônes (PROTOTYPE).
+import { createCustomWidgetFileText } from '../model/customWidgets.js';
 import { createModuleScreen } from '../model/document.js';
 import { applyModuleOverrides } from '../model/modules.js';
 import { createZip } from '../utils/zip.js';
@@ -71,6 +72,7 @@ export async function buildSpecPackage(uiDocument, uiSpec, specFiles, options) {
     packagedSpec.icons[iconReference] = { ...icon, file: iconPath };
     files.push({ path: iconPath, content: icon.svg });
   }
+  for (const [customWidgetId, definition] of Object.entries(uiDocument.customWidgets ?? {})) files.push({ path: `custom-widgets/${customWidgetId}.uimwidget`, content: createCustomWidgetFileText(definition) });
   files.unshift({ path: 'ui.json', content: JSON.stringify(packagedSpec, null, 2) });
   if (specFiles.schemaText) files.push({ path: 'ui.schema.json', content: specFiles.schemaText }); else problems.push('ui.schema.json absent (app hors ligne ?)');
   if (specFiles.guideText) files.push({ path: 'UISPEC_GUIDE.md', content: specFiles.guideText }); else problems.push('UISPEC_GUIDE.md absent (app hors ligne ?)');

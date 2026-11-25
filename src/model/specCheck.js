@@ -3,7 +3,7 @@ import { buildNodeIndex } from './document.js';
 import { validateWithSchema } from '../utils/schemaValidator.js';
 
 /** Champs qui contiennent un ID, et où le chercher. */
-const REFERENCE_COLLECTIONS = { style: 'styles', moduleId: 'modules', itemModuleId: 'modules', menuId: 'menus', variableId: 'variables', countVariableId: 'variables' };
+const REFERENCE_COLLECTIONS = { style: 'styles', moduleId: 'modules', itemModuleId: 'modules', menuId: 'menus', variableId: 'variables', countVariableId: 'variables', customWidgetId: 'customWidgets' };
 const NODE_REFERENCE_KEYS = ['target', 'controlsPageStack'];
 
 /**
@@ -57,7 +57,7 @@ function findNameProblems(uiSpec, nodeIndex) {
     else if (record.kind === 'module') addName('modules', record.node.name, id);
     else addName(record.screen.id, record.node.name, id);
   }
-  for (const [collectionName, label] of [['styles', 'styles'], ['colorVariables', 'variables de couleur'], ['variables', 'variables de test'], ['themes', 'thèmes'], ['menus', 'menus']]) {
+  for (const [collectionName, label] of [['styles', 'styles'], ['colorVariables', 'variables de couleur'], ['variables', 'variables de test'], ['customWidgets', 'custom widgets'], ['themes', 'thèmes'], ['menus', 'menus']]) {
     for (const [entryId, entry] of Object.entries(uiSpec[collectionName] ?? {})) addName(label, entry.name, entryId);
   }
   for (const { groupLabel, name, ids } of groups.values()) {

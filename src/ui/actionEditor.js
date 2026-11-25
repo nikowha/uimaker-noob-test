@@ -4,6 +4,7 @@ import { attachNumberLimits } from '../utils/numbers.js';
 import { appState } from '../model/store.js';
 import { buildNodeIndex } from '../model/document.js';
 import { ACTION_TYPES, EVENT_TRIGGERS } from '../model/interactions.js';
+import { getCustomWidgetTriggers } from '../model/customWidgets.js';
 import { VARIABLE_OPERATIONS } from '../model/variables.js';
 import { createButtonRow, createPanelSection, createSelectElement } from './fields.js';
 
@@ -56,7 +57,7 @@ export function createActionEditor(action, onChange) {
     const operation = currentAction.operation ?? 'set';
     controls.push(createSelectElement(operation, VARIABLE_OPERATIONS, (newOperation) => commitAction({ operation: newOperation })));
     if (operation !== 'toggle') {
-      const amountInput = createElement('input', { attributes: { type: 'text', placeholder: 'valeur' }, on: { change: () => commitAction({ operation, amount: amountInput.value }) } });
+      const amountInput = createElement('input', { attributes: { type: 'text', placeholder: 'valeur', title: 'Dans un custom widget : {réglage} = la valeur de ce réglage, ex. {value}' }, on: { change: () => commitAction({ operation, amount: amountInput.value }) } });
       amountInput.value = currentAction.amount ?? '';
       controls.push(amountInput);
     }
@@ -78,7 +79,8 @@ export function createActionEditor(action, onChange) {
  * @returns {HTMLElement} section
  */
 export function createEventsSection(node, isScreen, updateThisNode) {
-  const triggerChoices = EVENT_TRIGGERS.filter((trigger) => isScreen || !trigger.isScreenLevel);
+  const widgetTriggers = getCustomWidgetTriggers(appState.uiDocument.customWidgets?.[node.customWidgetId]);
+  const triggerChoices = [...widgetTriggers, ...EVENT_TRIGGERS.filter((trigger) => isScreen || !trigger.isScreenLevel)];
   const eventRows = (node.events ?? []).map((nodeEvent, eventIndex) => {
     const updateEvent = (changes) => updateThisNode((targetNode) => { targetNode.events[eventIndex] = { ...targetNode.events[eventIndex], ...changes }; });
     const keyInput = nodeEvent.trigger === 'keyShortcut'
@@ -101,7 +103,7 @@ export function createEventsSection(node, isScreen, updateThisNode) {
       : 'Ce qui se passe quand on clique, touche, survole… Le premier événement qui correspond gagne (sinon celui de l\'area, puis de l\'écran).' }),
     ...eventRows,
     createButtonRow([{ label: '+ Événement', onClick: () => updateThisNode((targetNode) => {
-      (targetNode.events ??= []).push({ trigger: isScreen ? 'pencilDoubleTap' : 'rightClick', action: { type: 'none' } });
+      (targetNode.events ??= []).push({ trigger: isScreen ? 'pencilDoubleTap' : widgetTriggers[0]?.value ?? 'rightClick', action: { type: 'none' } });
     }) }]),
   ]);
 }

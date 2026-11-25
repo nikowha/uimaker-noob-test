@@ -1,10 +1,11 @@
 // Modules : agencements réutilisables de widgets, d'areas et d'autres modules (PROTOTYPE).
-// À ne pas confondre avec un « custom widget » (widget codé), qui n'existe pas encore dans l'app.
+// À ne pas confondre avec un « custom widget » (widget codé) : voir customWidgets.js.
 import { buildNodeIndex, cloneJson, cloneSubtreeWithNewIds, collectSubtreeNodeIds, createId, remapIds } from './document.js';
+import { checkCustomWidget, installCustomWidget } from './customWidgets.js';
 
 export const MODULE_LIBRARY_FORMAT = 'uimaker-noob-modules';
 export const MODULE_LIBRARY_FORMAT_VERSION = '0.1';
-const COLOR_KEYS = new Set(['background', 'textColor', 'borderColor', 'checkedColor', 'alternateColor']);
+const COLOR_REFERENCE_PATTERN = /^\$V\d+$/;
 
 /**
  * Enregistre un widget ou une area (avec son contenu) comme module du projet. L'original ne change pas.
@@ -441,7 +442,7 @@ export function countModuleInstances(uiDocument, moduleId) {
 
 /** @returns {{styles: Set, colorVariables: Set, menus: Set, modules: Set}} relevé de références vide */
 function createReferenceSets() {
-  return { styles: new Set(), colorVariables: new Set(), menus: new Set(), modules: new Set(), variables: new Set() };
+  return { styles: new Set(), colorVariables: new Set(), menus: new Set(), modules: new Set(), variables: new Set(), customWidgets: new Set() };
 }
 
 /**
@@ -458,7 +459,8 @@ function collectReferences(value, references) {
     else if (key === 'menuId') references.menus.add(childValue);
     else if (key === 'variableId' || key === 'countVariableId') references.variables.add(childValue);
     else if (key === 'moduleId' || key === 'itemModuleId') references.modules.add(childValue);
-    else if (COLOR_KEYS.has(key) && childValue.startsWith('$')) references.colorVariables.add(childValue.slice(1));
+    else if (key === 'customWidgetId') references.customWidgets.add(childValue);
+    else if (COLOR_REFERENCE_PATTERN.test(childValue)) references.colorVariables.add(childValue.slice(1));
   }
 }
 
@@ -521,7 +523,7 @@ export function buildLibraryEntry(uiDocument, moduleId) {
   return { libraryId: module.libraryId, version: module.version ?? 1, name: module.name, kind: module.kind, category: '', tags: [],
     updatedAt: module.libraryUpdatedAt ?? new Date().toISOString(),
     package: { rootModuleId: moduleId, modules, menus, colorVariables, styles: pickEntries(uiDocument.styles, references.styles),
-      variables: pickEntries(uiDocument.variables ?? {}, references.variables) } };
+      variables: pickEntries(uiDocument.variables ?? {}, references.variables), customWidgets: pickEntries(uiDocument.customWidgets ?? {}, references.customWidgets) } };
 }
 
 /**
@@ -573,6 +575,12 @@ export function installLibraryEntry(uiDocument, entry, shouldUpdate = false) {
     uiDocument.colorVariables[createdId] = { name: packagedVariable.name,
       values: Object.fromEntries(Object.entries(uiDocument.themes).map(([themeId, theme]) => [themeId, packagedVariable.values[theme.name] ?? fallbackColor])) };
     idMapping.set(variableId, createdId);
+  }
+  for (const customWidgetId of references.customWidgets) {
+    const definition = packageData.customWidgets?.[customWidgetId];
+    if (!definition) continue;
+    const projectDefinition = Object.values(uiDocument.customWidgets ?? {}).find((candidate) => candidate.libraryId === definition.libraryId);
+    idMapping.set(customWidgetId, installCustomWidget(uiDocument, definition, shouldUpdate && projectDefinition?.version < definition.version));
   }
   uiDocument.variables ??= {};
   for (const variableId of references.variables) {
@@ -689,7 +697,8 @@ export function parseModuleFile(fileText) {
       && Object.values(packageData.modules).every((module) => module.libraryId && module.root?.id);
     if (!isComplete) throw new Error(`Module incomplet : ${entry?.name ?? '?'}`);
     if (hasModuleCycle(packageData.modules, packageData.rootModuleId)) throw new Error(`Le module « ${entry.name} » se contient lui-même`);
-    for (const collectionName of ['styles', 'colorVariables', 'menus']) packageData[collectionName] ??= {};
+    for (const collectionName of ['styles', 'colorVariables', 'menus', 'customWidgets']) packageData[collectionName] ??= {};
+    for (const [customWidgetId, definition] of Object.entries(packageData.customWidgets)) packageData.customWidgets[customWidgetId] = checkCustomWidget(definition);
     return { ...entry, name: String(entry.name ?? rootModule.name), kind: rootModule.kind, category: String(entry.category ?? ''),
       tags: Array.isArray(entry.tags) ? entry.tags.map(String) : [], version: Number(entry.version) || 1 };
   });

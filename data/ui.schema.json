@@ -1,6 +1,6 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
- "title": "UImaker_noob UI spec 0.3",
+ "title": "UImaker_noob UI spec 0.4",
  "type": "object",
  "required": [
   "format",
@@ -130,6 +130,15 @@
    },
    "additionalProperties": {
     "$ref": "#/$defs/module"
+   }
+  },
+  "customWidgets": {
+   "type": "object",
+   "propertyNames": {
+    "pattern": "^X[0-9]+$"
+   },
+   "additionalProperties": {
+    "$ref": "#/$defs/customWidget"
    }
   },
   "variables": {
@@ -342,21 +351,29 @@
    ],
    "properties": {
     "trigger": {
-     "enum": [
-      "click",
-      "doubleClick",
-      "rightClick",
-      "middleClick",
-      "hoverEnter",
-      "hoverLeave",
-      "wheel",
-      "tap",
-      "doubleTap",
-      "longPress",
-      "pencilTap",
-      "pencilDoubleTap",
-      "pencilSqueeze",
-      "keyShortcut"
+     "anyOf": [
+      {
+       "enum": [
+        "click",
+        "doubleClick",
+        "rightClick",
+        "middleClick",
+        "hoverEnter",
+        "hoverLeave",
+        "wheel",
+        "tap",
+        "doubleTap",
+        "longPress",
+        "pencilTap",
+        "pencilDoubleTap",
+        "pencilSqueeze",
+        "keyShortcut"
+       ]
+      },
+      {
+       "type": "string",
+       "pattern": "^widget:[A-Za-z][A-Za-z0-9]*$"
+      }
      ]
     },
     "key": {
@@ -680,8 +697,13 @@
       "repeat",
       "placeholder",
       "moduleInstance",
+      "customWidget",
       "image"
      ]
+    },
+    "customWidgetId": {
+     "type": "string",
+     "pattern": "^X[0-9]+$"
     },
     "size": {
      "$ref": "#/$defs/size"
@@ -1312,6 +1334,106 @@
      }
     }
    ]
+  },
+  "customWidget": {
+   "type": "object",
+   "required": [
+    "name",
+    "libraryId",
+    "version",
+    "params"
+   ],
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "libraryId": {
+     "type": "string"
+    },
+    "version": {
+     "type": "number"
+    },
+    "basedOn": {
+     "type": "string"
+    },
+    "html": {
+     "type": "string"
+    },
+    "css": {
+     "type": "string"
+    },
+    "js": {
+     "type": "string"
+    },
+    "previewSvg": {
+     "type": "string"
+    },
+    "nativeNotes": {
+     "type": "string"
+    },
+    "params": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "key",
+       "type"
+      ],
+      "properties": {
+       "key": {
+        "type": "string"
+       },
+       "label": {
+        "type": "string"
+       },
+       "type": {
+        "enum": [
+         "number",
+         "text",
+         "boolean",
+         "choice",
+         "color"
+        ]
+       },
+       "min": {
+        "type": "number"
+       },
+       "max": {
+        "type": "number"
+       },
+       "step": {
+        "type": "number"
+       },
+       "choices": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    },
+    "events": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "name"
+      ],
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "description": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
   },
   "screen": {
    "type": "object",

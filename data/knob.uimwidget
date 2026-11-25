@@ -1,0 +1,78 @@
+{
+  "format": "uimaker-noob-custom-widget",
+  "formatVersion": "1",
+  "widget": {
+    "libraryId": "7c1d0f5e-2a44-4b0e-9a53-6f1f0f7d2c11",
+    "version": 1,
+    "updatedAt": "2026-11-25T12:00:00.000Z",
+    "name": "Knob",
+    "description": "Potard rotatif : glisser vers le haut ou le bas.",
+    "tags": [
+      "knob",
+      "potard",
+      "rotary"
+    ],
+    "basedOn": "",
+    "size": {
+      "width": 80,
+      "height": 104
+    },
+    "params": [
+      {
+        "key": "label",
+        "label": "Texte",
+        "type": "text",
+        "default": "Volume"
+      },
+      {
+        "key": "value",
+        "label": "Valeur",
+        "type": "number",
+        "step": 1,
+        "default": 50
+      },
+      {
+        "key": "min",
+        "label": "Minimum",
+        "type": "number",
+        "default": 0
+      },
+      {
+        "key": "max",
+        "label": "Maximum",
+        "type": "number",
+        "default": 100
+      },
+      {
+        "key": "step",
+        "label": "Pas",
+        "type": "number",
+        "min": 0,
+        "default": 1
+      },
+      {
+        "key": "unit",
+        "label": "Unité",
+        "type": "text",
+        "default": ""
+      },
+      {
+        "key": "accentColor",
+        "label": "Couleur",
+        "type": "color",
+        "default": "#4C8DFF"
+      }
+    ],
+    "events": [
+      {
+        "name": "doubleTap",
+        "description": "Double tap sur le potard"
+      }
+    ],
+    "html": "<div id=\"knob\"><div id=\"label\"></div><svg viewBox=\"0 0 80 80\"><path d=\"M 18.79 61.21 A 30 30 0 1 1 61.21 61.21\" class=\"track\"/><path id=\"valueArc\" class=\"track\"/><circle cx=\"40\" cy=\"40\" r=\"21\" class=\"cap\"/><line id=\"needle\" x1=\"40\" y1=\"36\" x2=\"40\" y2=\"22\"/></svg><div id=\"value\"></div></div>",
+    "css": "#knob{display:flex;flex-direction:column;align-items:center;width:100%;height:100%;color:var(--textMain,#e6e7ea);font-size:12px}\nsvg{flex:1;min-height:0;width:100%}\n.track{fill:none;stroke:#80808055;stroke-width:6;stroke-linecap:round}\n.cap{fill:var(--surface,#34373e);stroke:#80808066}\n#needle{stroke:currentColor;stroke-width:4;stroke-linecap:round}",
+    "js": "const START_ANGLE = -135;\nconst ANGLE_RANGE = 270;\nconst PIXELS_FOR_FULL_RANGE = 160;\nconst DOUBLE_TAP_DELAY_MS = 300;\nconst knobElement = document.getElementById('knob');\nconst valueArc = document.getElementById('valueArc');\nconst needle = document.getElementById('needle');\nlet currentValue = 0;\nlet dragValue = 0;\nlet hasMoved = false;\nlet lastTapTime = 0;\n\n/** Place un point sur le cercle du potard. */\nfunction getArcPoint(angleDegrees) {\n  const angle = (angleDegrees - 90) * Math.PI / 180;\n  return (40 + 30 * Math.cos(angle)).toFixed(2) + ' ' + (40 + 30 * Math.sin(angle)).toFixed(2);\n}\n\n/** Dessine le potard avec la valeur actuelle. */\nfunction drawKnob() {\n  const { min, max, label, accentColor, unit } = uimaker.params;\n  const ratio = max > min ? (currentValue - min) / (max - min) : 0;\n  const angle = START_ANGLE + ratio * ANGLE_RANGE;\n  valueArc.setAttribute('d', 'M ' + getArcPoint(START_ANGLE) + ' A 30 30 0 ' + (ratio * ANGLE_RANGE > 180 ? 1 : 0) + ' 1 ' + getArcPoint(angle));\n  valueArc.style.stroke = accentColor;\n  needle.setAttribute('transform', 'rotate(' + angle + ' 40 40)');\n  document.getElementById('label').textContent = label;\n  document.getElementById('value').textContent = (Math.round(currentValue * 100) / 100) + unit;\n}\n\n/** Arrondit au pas et reste entre min et max. */\nfunction limitValue(value) {\n  const { min, max, step } = uimaker.params;\n  const steppedValue = step > 0 ? min + Math.round((value - min) / step) * step : value;\n  return Math.max(min, Math.min(max, steppedValue));\n}\n\nuimaker.onUpdate(() => { currentValue = limitValue(uimaker.params.value); drawKnob(); });\n\nuimaker.trackDrag(knobElement, {\n  onStart: () => { dragValue = currentValue; hasMoved = false; },\n  onMove: ({ deltaY }) => {\n    const { min, max } = uimaker.params;\n    if (Math.abs(deltaY) > 0) hasMoved = true;\n    dragValue = Math.max(min, Math.min(max, dragValue - deltaY * (max - min) / PIXELS_FOR_FULL_RANGE));\n    const newValue = limitValue(dragValue);\n    if (newValue === currentValue) return;\n    currentValue = newValue;\n    uimaker.setParam('value', newValue);\n    drawKnob();\n  },\n  onEnd: ({ event }) => {\n    if (hasMoved || event.type === 'pointercancel') return;\n    const now = performance.now();\n    if (now - lastTapTime < DOUBLE_TAP_DELAY_MS) uimaker.emit('doubleTap');\n    lastTapTime = now;\n  },\n});",
+    "previewSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 80 104\"><text x=\"40\" y=\"12\" font-size=\"12\" text-anchor=\"middle\" fill=\"currentColor\">Knob</text><path d=\"M 18.79 73.21 A 30 30 0 1 1 61.21 73.21\" fill=\"none\" stroke=\"#808080\" stroke-opacity=\"0.35\" stroke-width=\"6\" stroke-linecap=\"round\"/><path d=\"M 18.79 73.21 A 30 30 0 0 1 40 22\" fill=\"none\" stroke=\"#4C8DFF\" stroke-width=\"6\" stroke-linecap=\"round\"/><circle cx=\"40\" cy=\"52\" r=\"21\" fill=\"#34373e\" stroke=\"#808080\" stroke-opacity=\"0.4\"/><line x1=\"40\" y1=\"48\" x2=\"40\" y2=\"34\" stroke=\"#e6e7ea\" stroke-width=\"4\" stroke-linecap=\"round\"/><text x=\"40\" y=\"100\" font-size=\"12\" text-anchor=\"middle\" fill=\"currentColor\">50</text></svg>",
+    "nativeNotes": "Glisser vertical : 160 px = toute la plage. Arc de 270°, de -135° à +135°. SwiftUI : Canvas + DragGesture, accessibilityAdjustableAction. WinUI : UserControl + ManipulationDelta. Qt : QDial redessiné (paintEvent)."
+  }
+}

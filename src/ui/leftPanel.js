@@ -2,6 +2,9 @@
 import { createElement } from '../utils/dom.js';
 import { limitNumber } from '../utils/numbers.js';
 import { appSettings, appState, commitChange, DEFAULT_APP_SETTINGS, notifyChange, selectNode, updateAppSetting } from '../model/store.js';
+import { getCustomWidgetFields, isCustomWidgetUpdateAvailable } from '../model/customWidgets.js';
+import { getCustomWidgetEntry } from '../io/customWidgetLibrary.js';
+import { updateCustomWidget } from './customWidgetsView.js';
 import { ANCHORS, APPEARANCE_FIELDS, getFieldLimits, limitWidgetNumbers, PLATFORMS, SCREEN_PRESETS, STYLE_TARGETS, WIDGET_TYPES } from '../model/catalog.js';
 import { buildNodeIndex, computeNodePath, countStyleUsers, createId, createModuleScreen, createPage } from '../model/document.js';
 import { addModuleState, canRepeatModuleIn, countModuleInstances, deleteModuleState, getRepeatCount, isModuleUpdateAvailable, listInstanceNodes } from '../model/modules.js';
@@ -295,6 +298,31 @@ function canRepeatModule(widgetId, moduleId) {
 }
 
 /**
+ * Champs propres à un widget : ceux du catalogue, ou les réglages d'un custom widget.
+ * @param {object} widget widget
+ * @returns {object[]} champs
+ */
+function getWidgetFields(widget) {
+  if (widget.type === 'customWidget') return getCustomWidgetFields(appState.uiDocument.customWidgets?.[widget.customWidgetId]);
+  return WIDGET_TYPES[widget.type]?.fields ?? [];
+}
+
+/**
+ * Infos d'un custom widget : description, version, mise à jour.
+ * @param {object} widget widget
+ * @returns {HTMLElement[]} éléments
+ */
+function createCustomWidgetInfo(widget) {
+  const definition = appState.uiDocument.customWidgets?.[widget.customWidgetId];
+  if (!definition) return [createElement('div', { className: 'panel-hint', text: 'Définition introuvable dans ce projet.' })];
+  const entry = getCustomWidgetEntry(definition.libraryId);
+  return [
+    createElement('div', { className: 'panel-hint', text: `v${definition.version}${definition.description ? ` — ${definition.description}` : ''}` }),
+    ...(isCustomWidgetUpdateAvailable(definition, entry) ? [createButtonRow([{ label: `Mettre à jour → v${entry.version}`, onClick: () => updateCustomWidget(widget.customWidgetId) }])] : []),
+  ];
+}
+
+/**
  * Champ de contenu d'un widget selon sa définition dans le catalogue.
  * @param {object} widget widget
  * @param {object} fieldDefinition { target, key, label, kind, options }
@@ -409,9 +437,11 @@ function createWidgetProperties(widget, record) {
   const updatePlacement = (key, value) => updateNode(widget.id, (targetWidget) => { targetWidget.placement ??= { anchor: 'topLeft', x: 0, y: 0 }; setOrDeleteValue(targetWidget.placement, key, value); });
   const typeLabel = widget.type === 'moduleInstance'
     ? `Module ${widget.moduleId} · ${appState.uiDocument.modules[widget.moduleId]?.name ?? '?'}`
+    : widget.type === 'customWidget' ? `Custom widget ${widget.customWidgetId} · ${appState.uiDocument.customWidgets?.[widget.customWidgetId]?.name ?? '?'}`
     : typeDefinition?.label ?? widget.type;
   const sections = [putInTab('properties', createPanelSection(typeLabel, [
     ...createIdentityFields(widget),
+    ...(widget.type === 'customWidget' ? createCustomWidgetInfo(widget) : []),
     widget.type === 'moduleInstance' ? createModuleButtonRow(widget.moduleId) : null,
     isModuleRoot ? null : createButtonRow([
       { label: 'Dupliquer', onClick: duplicateSelection },
@@ -422,7 +452,7 @@ function createWidgetProperties(widget, record) {
     ]),
   ].filter(Boolean)))];
   if (widget.type === 'moduleInstance') sections.push(...createInstanceStateSection(widget, (mutateNode) => updateNode(widget.id, mutateNode)));
-  if (typeDefinition?.fields.length) sections.push(putInTab('properties', createPanelSection('Contenu', typeDefinition.fields.map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition)))));
+  if (getWidgetFields(widget).length) sections.push(putInTab('properties', createPanelSection(widget.type === 'customWidget' ? 'Réglages du widget' : 'Contenu', getWidgetFields(widget).map((fieldDefinition) => createWidgetContentField(widget, fieldDefinition)))));
   const sizeAndPlacementFields = [
     createSizeField('Largeur', widget.size?.width, (width) => updateSize('width', width), sizeLimits('Width')),
     createSizeField('Hauteur', widget.size?.height, (height) => updateSize('height', height), sizeLimits('Height')),
@@ -566,14 +596,14 @@ function createInstanceSettingsSections(instance, updateInstance = (mutateInstan
   if (entries.length === 0) return [putInTab('properties', createPanelSection(title, [createElement('div', { className: 'panel-hint', text: 'Module introuvable.' })]))];
   const getEntryKey = (entry) => [...entry.path, entry.node.id].join('/');
   const selectedEntry = entries.find((entry) => getEntryKey(entry) === innerNodeKeyByInstance.get(instance.id))
-    ?? entries.find((entry) => WIDGET_TYPES[entry.node.type]?.fields.length && !entry.node.children) ?? entries[0];
+    ?? entries.find((entry) => getWidgetFields(entry.node).length && !entry.node.children) ?? entries[0];
   const { node } = selectedEntry;
   const updateInner = (mutateNode) => updateInstanceNode(updateInstance, selectedEntry, mutateNode);
   const isInstanceRoot = selectedEntry === entries[0] && !isModuleState;
   const updateState = (key, value) => updateInner((targetNode) => { targetNode.state = { ...targetNode.state, [key]: value }; });
   const styleChoices = [{ value: '', label: '— aucun —' }, ...Object.entries(appState.uiDocument.styles).map(([styleId, style]) => ({ value: styleId, label: `${style.name} (${styleId})` }))];
   const changedCount = entries.filter((entry) => entry.isChanged).length;
-  const contentFields = (WIDGET_TYPES[node.type]?.fields ?? []).filter((fieldDefinition) => fieldDefinition.target !== 'widget' && fieldDefinition.kind !== 'pageStackRef');
+  const contentFields = getWidgetFields(node).filter((fieldDefinition) => fieldDefinition.target !== 'widget' && fieldDefinition.kind !== 'pageStackRef');
   const createHint = (text) => createElement('div', { className: 'panel-hint', text });
   const chooseEntry = (entryKey) => {
     innerNodeKeyByInstance.set(instance.id, entryKey);
@@ -705,7 +735,7 @@ function createTreeView() {
   }, [createElement('code', { text: node.id }), createElement('span', { text: ` ${node.name ?? ''}` }), createElement('span', { className: 'tree-kind', text: kindLabel })]);
   const rows = [];
   const visitWidget = (widget, depth) => {
-    rows.push(createTreeRow(widget, depth, widget.type === 'moduleInstance' ? `module ${widget.moduleId}` : WIDGET_TYPES[widget.type]?.label ?? widget.type));
+    rows.push(createTreeRow(widget, depth, widget.type === 'moduleInstance' ? `module ${widget.moduleId}` : widget.type === 'customWidget' ? `custom widget ${widget.customWidgetId}` : WIDGET_TYPES[widget.type]?.label ?? widget.type));
     for (const childWidget of widget.children ?? []) visitWidget(childWidget, depth + 1);
   };
   const visitArea = (area, depth) => {

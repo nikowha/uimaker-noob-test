@@ -247,4 +247,4 @@ export const APPEARANCE_FIELDS = [
 ];
 
 /** Cibles possibles d'un style (appliesTo). */
-export const STYLE_TARGETS = ['any', 'area', ...Object.keys(WIDGET_TYPES)];
+export const STYLE_TARGETS = ['any', 'area', ...Object.keys(WIDGET_TYPES), 'customWidget'];

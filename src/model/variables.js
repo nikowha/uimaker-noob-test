@@ -48,12 +48,13 @@ export function setVariableKind(variable, kind) {
  * Calcule la valeur après une action « changer une variable ».
  * @param {object} variable variable
  * @param {object} action { operation, amount }
+ * @param {Record<string, any>} [sourceContent] réglages du custom widget qui lance l'action
  * @returns {number|boolean|string} nouvelle valeur
  */
-export function computeVariableChange(variable, action) {
+export function computeVariableChange(variable, action, sourceContent = {}) {
   if (action.operation === 'toggle') return variable.kind === 'boolean' ? !variable.value : variable.value;
-  if (action.operation === 'add' && variable.kind === 'number') return convertVariableValue(variable, variable.value + (Number(action.amount) || 0));
-  return convertVariableValue(variable, action.amount);
+  if (action.operation === 'add' && variable.kind === 'number') return convertVariableValue(variable, variable.value + (Number(readAmount(action.amount, sourceContent)) || 0));
+  return convertVariableValue(variable, readAmount(action.amount, sourceContent));
 }
 
 /**
@@ -94,4 +95,15 @@ export function countVariableUsers(uiDocument, variableId) {
   };
   visitValue([uiDocument.screens, uiDocument.modules, uiDocument.menus]);
   return userCount;
+}
+
+/**
+ * Lit la valeur d'une action ; « {réglage} » = réglage du custom widget qui lance l'action.
+ * @param {any} amount valeur de l'action
+ * @param {Record<string, any>} sourceContent réglages du widget
+ * @returns {any} valeur
+ */
+function readAmount(amount, sourceContent) {
+  const paramKey = typeof amount === 'string' ? /^\{(\w+)\}$/.exec(amount.trim())?.[1] : null;
+  return paramKey && Object.hasOwn(sourceContent, paramKey) ? sourceContent[paramKey] : amount;
 }

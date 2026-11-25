@@ -1,6 +1,7 @@
 // Fichiers .uimnoob : un projet, ou tous les projets et la bibliothèque de modules (PROTOTYPE).
 import { normalizeImportedDocument } from '../model/document.js';
 import { addImportedVersions, addProject, markFileSaved, replaceProject } from '../model/projects.js';
+import { importCustomWidgets, listCustomWidgetEntries } from './customWidgetLibrary.js';
 import { createModuleFileText, importModuleFile, listLibraryEntries } from './moduleLibrary.js';
 import { readAllProjects, readVersions } from './projectDatabase.js';
 import { saveFile } from '../utils/dom.js';
@@ -13,14 +14,15 @@ const PROJECT_FILE_FORMAT_VERSION = '1';
  * @param {object[]} records projets
  * @param {object[]} moduleEntries modules de la bibliothèque à joindre
  * @param {string} baseName nom du fichier sans extension
+ * @param {object[]} [customWidgets] custom widgets de la bibliothèque à joindre
  */
-async function saveProjectFile(records, moduleEntries, baseName) {
+async function saveProjectFile(records, moduleEntries, baseName, customWidgets = []) {
   const projects = [];
   for (const record of records) {
     const versions = (await readVersions(record.id)).filter((version) => version.kind === 'named');
     projects.push({ id: record.id, name: record.name, createdAt: record.createdAt, updatedAt: record.updatedAt, document: record.document, versions });
   }
-  const fileText = JSON.stringify({ format: PROJECT_FILE_FORMAT, formatVersion: PROJECT_FILE_FORMAT_VERSION, savedAt: new Date().toISOString(), projects, modules: moduleEntries });
+  const fileText = JSON.stringify({ format: PROJECT_FILE_FORMAT, formatVersion: PROJECT_FILE_FORMAT_VERSION, savedAt: new Date().toISOString(), projects, modules: moduleEntries, customWidgets });
   const isSaved = await saveFile(`${baseName.replace(/[^\p{L}\p{N}_-]+/gu, '_')}.uimnoob`, fileText, 'application/json');
   if (isSaved) await markFileSaved(records);
 }
@@ -38,7 +40,7 @@ export function saveOneProjectFile(record) {
  * @param {object[]} records projets
  */
 export function saveBackupFile(records) {
-  return saveProjectFile(records, listLibraryEntries(), `UImaker_noob_backup_${new Date().toISOString().slice(0, 10)}`);
+  return saveProjectFile(records, listLibraryEntries(), `UImaker_noob_backup_${new Date().toISOString().slice(0, 10)}`, listCustomWidgetEntries());
 }
 
 /**
@@ -73,11 +75,11 @@ function checkProjects(fileValue) {
  * @param {any} fileValue contenu
  * @param {(importedProject: object, existingRecord: object) => Promise<'replace'|'both'|'skip'>} askConflict question posée quand un projet existe déjà
  * @param {(entry: object) => boolean} shouldReplaceModule question posée quand un module diffère
- * @returns {Promise<{addedRecords: object[], replacedCount: number, skippedCount: number, moduleCount: number}>} bilan
+ * @returns {Promise<{addedRecords: object[], replacedCount: number, skippedCount: number, moduleCount: number, customWidgetCount: number}>} bilan
  */
 export async function importProjectFile(fileValue, askConflict, shouldReplaceModule) {
   const importedProjects = checkProjects(fileValue);
-  const report = { addedRecords: [], replacedCount: 0, skippedCount: 0, moduleCount: 0 };
+  const report = { addedRecords: [], replacedCount: 0, skippedCount: 0, moduleCount: 0, customWidgetCount: 0 };
   for (const importedProject of importedProjects) {
     const { versions, ...project } = importedProject;
     const existingRecord = (await readAllProjects()).find((record) => record.id === project.id);
@@ -101,5 +103,6 @@ export async function importProjectFile(fileValue, askConflict, shouldReplaceMod
   if (Array.isArray(fileValue.modules) && fileValue.modules.length) {
     report.moduleCount = (await importModuleFile(createModuleFileText(fileValue.modules), shouldReplaceModule)).addedCount;
   }
+  if (Array.isArray(fileValue.customWidgets) && fileValue.customWidgets.length) report.customWidgetCount = await importCustomWidgets(fileValue.customWidgets, shouldReplaceModule);
   return report;
 }
